@@ -20,7 +20,7 @@ class Pi5Pixelbuf(adafruit_pixelbuf.PixelBuf):
 
 pixels = Pi5Pixelbuf(NEOPIXEL, num_pixels, auto_write=True, byteorder="BGR")
 
-chase = Chase(pixels, speed=0.06, color=0x0065FF, spacing=3)
+chase = Chase(pixels, speed=0.06, color=(155, 0, 101), spacing=3)
 
 try:
     while True:
