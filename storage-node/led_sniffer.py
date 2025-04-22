@@ -1,6 +1,7 @@
 import os
 import logging
-from datetime import datetime
+import argparse
+from threading import Timer, Lock
 from scapy.all import sniff, TCP, IP, conf
 
 # Prepare for LED strip when uncommented
@@ -9,29 +10,29 @@ from scapy.all import sniff, TCP, IP, conf
 
 
 class LedSniffer:
-    """TCP sniffer that triggers LED strips when traffic is detected."""
+    """TCP sniffer that triggers LED strips when traffic volume exceeds threshold,
+    with debounce functionality to prevent constant flickering."""
 
     DEFAULT_LED_COUNT = 30
     DEFAULT_LED_STRIP_CONTROL_PIN = 18  # board.d18
+    DEFAULT_DATA_THRESHOLD = 1024  # Bytes of data to trigger LED (1KB)
+    DEFAULT_INACTIVITY_TIMEOUT = 3.0  # Seconds of no packets before LEDs turn off
 
     def __init__(
         self,
         port,
         led_count=DEFAULT_LED_COUNT,
         led_strip_control_pin=DEFAULT_LED_STRIP_CONTROL_PIN,
+        data_threshold=DEFAULT_DATA_THRESHOLD,
+        inactivity_timeout=DEFAULT_INACTIVITY_TIMEOUT,
         log_level=logging.INFO,
     ):
-        """Initialize the LED sniffer with the specified parameters.
-
-        Args:
-            port: TCP port to monitor
-            led_count: Number of LEDs in the strip
-            led_strip_control_pin: GPIO pin for controlling the LED strip
-            log_level: Logging level
-        """
+        """Initialize the LED sniffer with the specified parameters."""
         self.port = int(port)
         self.led_count = led_count
         self.led_strip_control_pin = led_strip_control_pin
+        self.data_threshold = data_threshold
+        self.inactivity_timeout = inactivity_timeout
 
         # Setup logging
         self.logger = self._setup_logging(log_level)
@@ -42,9 +43,11 @@ class LedSniffer:
         #     led_count=self.led_count
         # )
 
-        # Track statistics
-        self.packets_seen = 0
-        self.start_time = datetime.now()
+        # Debounce state variables
+        self.data_volume = 0
+        self.led_active = False
+        self.timer = None
+        self.lock = Lock()  # To prevent race conditions
 
     def _setup_logging(self, log_level):
         """Configure logging with consistent formatting."""
@@ -62,7 +65,7 @@ class LedSniffer:
         return logger
 
     def _handle_packet(self, pkt):
-        """Process captured TCP packets and trigger LED if needed."""
+        """Process captured TCP packets and trigger LED if data threshold is met."""
         if IP in pkt and TCP in pkt:
             try:
                 src = pkt[IP].src
@@ -70,61 +73,101 @@ class LedSniffer:
                 sport = pkt[TCP].sport
                 dport = pkt[TCP].dport
                 flags = pkt[TCP].flags
+
+                # Calculate actual payload size
                 payload_len = len(pkt[TCP].payload)
 
-                self.packets_seen += 1
-
-                # Log packet details
-                self.logger.info(
+                # Log packet info outside the lock to avoid holding lock during I/O
+                self.logger.debug(
                     f"{src}:{sport} → {dst}:{dport} | "
                     f"Flags={flags} | Payload={payload_len} bytes"
                 )
 
-                # Here you would activate LED strip
-                # self.led_strip.flash(color=(255, 0, 0), duration_ms=100)
+                # Minimize the critical section - only lock when updating shared state
+                old_timer = None
+                with self.lock:
+                    # Store reference to old timer
+                    old_timer = self.timer
+                    self.timer = None
 
-                # Print statistics every 100 packets
-                if self.packets_seen % 100 == 0:
-                    self._print_statistics()
+                    # Add data size
+                    self.data_volume += payload_len
+                    should_turn_on = (
+                        not self.led_active and self.data_volume >= self.data_threshold
+                    )
+
+                # Cancel any existing timer outside the lock
+                if old_timer:
+                    old_timer.cancel()
+
+                # Create new timer outside the lock
+                new_timer = Timer(self.inactivity_timeout, self._turn_off_leds)
+                new_timer.daemon = True
+
+                # Update timer reference with lock
+                with self.lock:
+                    self.timer = new_timer
+
+                # Start timer outside lock
+                self.timer.start()
+
+                # Turn on LEDs if needed
+                if should_turn_on:
+                    self._turn_on_leds()
 
             except Exception as e:
                 self.logger.error(f"Error processing packet: {e}")
-        else:
-            self.logger.debug("Received non-TCP/IP packet")
 
-    def _print_statistics(self):
-        """Display running statistics about captured packets."""
-        runtime = datetime.now() - self.start_time
-        seconds = runtime.total_seconds()
-        rate = self.packets_seen / seconds if seconds > 0 else 0
+    def _turn_on_leds(self):
+        """Turn on the LED strip."""
+        # Acquire lock to check and update LED state
+        with self.lock:
+            if not self.led_active:
+                self.led_active = True
+                current_data = self.data_volume  # Capture for logging
 
+        # Log outside the lock
         self.logger.info(
-            f"Statistics: {self.packets_seen} packets captured in {runtime} "
-            f"({rate:.2f} packets/sec)"
+            f"LEDS lighting up (data threshold {current_data}/{self.data_threshold} bytes reached)"
         )
+        # When actual hardware is connected:
+        # self.led_strip.on(color=(255, 0, 0))  # Red light
+
+    def _turn_off_leds(self):
+        """Turn off the LED strip and reset data volume counter."""
+        # Acquire lock to check and update LED state
+        data_seen = 0
+        with self.lock:
+            if self.led_active:
+                self.led_active = False
+                data_seen = self.data_volume
+                self.data_volume = 0
+
+        # Only log if LEDs were actually turned off
+        if data_seen > 0:
+            self.logger.info(
+                f"LEDS turning off - inactivity timeout ({data_seen} bytes processed)"
+            )
+            # When actual hardware is connected:
+            # self.led_strip.off()
 
     def sniff(self, iface=None, timeout=None):
-        """
-        Start sniffing TCP traffic to/from the specified port.
-
-        Args:
-            iface: Network interface to capture on (None for default)
-            timeout: Capture timeout in seconds (None for no timeout)
-        """
+        """Start sniffing TCP traffic to/from the specified port."""
         # Filter packets that carry actual data (PSH bit set)
         bpf_filter = f"tcp port {self.port} and tcp[13] & 0x08 != 0"
 
         selected_iface = iface or conf.iface
         self.logger.info(f"Capturing on iface={selected_iface} filter='{bpf_filter}'")
-        self.logger.info(f"Monitoring port {self.port} for TCP traffic with PUSH flag")
+        self.logger.info(
+            f"Monitoring port {self.port} - LED will activate after "
+            f"{self.data_threshold} bytes and deactivate after "
+            f"{self.inactivity_timeout}s of inactivity"
+        )
 
         if os.geteuid() != 0:
             self.logger.warning("Not running as root. Packet capture may fail!")
 
         try:
-            self.start_time = datetime.now()
-            self.logger.info(f"Capture started at {self.start_time}")
-
             # Start the capture
             sniff(
                 iface=selected_iface,
@@ -138,13 +181,41 @@ class LedSniffer:
         except Exception as e:
             self.logger.error(f"Capture error: {e}")
         finally:
-            self._print_statistics()
+            # Clean up timer on exit
+            timer = None
+            with self.lock:
+                timer = self.timer
+                self.timer = None
+
+            if timer:
+                timer.cancel()
+
+
+# Helper function to parse sizes with suffixes
+def parse_size(size_str):
+    """Parse size strings like '1K', '2M', etc."""
+    if not isinstance(size_str, str):
+        return size_str
+
+    size_str = size_str.upper()
+    multipliers = {"K": 1024, "M": 1024 * 1024, "G": 1024 * 1024 * 1024}
+
+    for suffix, multiplier in multipliers.items():
+        if size_str.endswith(suffix):
+            try:
+                return int(float(size_str[:-1]) * multiplier)
+            except ValueError:
+                raise argparse.ArgumentTypeError(f"Invalid size format: {size_str}")
+
+    # If no suffix, try to convert directly to int
+    try:
+        return int(size_str)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"Invalid size format: {size_str}")
 
 
 def main():
     """Entry point for the application."""
-    import argparse
-
     parser = argparse.ArgumentParser(
         description="TCP packet sniffer with LED notification"
     )
@@ -157,19 +228,33 @@ def main():
     )
     parser.add_argument("-i", "--interface", help="Network interface to capture on")
     parser.add_argument(
+        "-t",
+        "--threshold",
+        type=parse_size,  # Use our custom parser
+        default=LedSniffer.DEFAULT_DATA_THRESHOLD,
+        help="Bytes of data needed to trigger LED (can use K, M, G suffixes)",
+    )
+    parser.add_argument(
+        "-d",
+        "--delay",
+        type=float,
+        default=LedSniffer.DEFAULT_INACTIVITY_TIMEOUT,
+        help="Seconds of inactivity before LEDs turn off",
+    )
+    parser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable verbose logging"
     )
-    args = parser.parse_args()
 
+    args = parser.parse_args()
     log_level = logging.DEBUG if args.verbose else logging.INFO
 
-    print(
-        f"Starting LedSniffer on port {args.port}. "
-        f"Use external netcat to generate traffic."
+    sniffer = LedSniffer(
+        port=args.port,
+        data_threshold=args.threshold,
+        inactivity_timeout=args.delay,
+        log_level=log_level,
     )
-
-    led_sniffer = LedSniffer(port=args.port, log_level=log_level)
-    led_sniffer.sniff(iface=args.interface)
+    sniffer.sniff(iface=args.interface)
 
 
 if __name__ == "__main__":
