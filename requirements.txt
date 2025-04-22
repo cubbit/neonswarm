@@ -18,6 +18,7 @@ pyusb==1.3.1
 RPi.GPIO==0.7.1
 rpi_ws281x==5.0.0
 RPLCD==1.4.0
+scapy==2.6.1
 smbus2==0.5.0
 sysv_ipc==1.1.0
 typing_extensions==4.13.2
