@@ -1,13 +1,11 @@
-import os
-import logging
 import argparse
-from threading import Timer, Lock
+import board
+import logging
+import os
+from led.strip import LEDStrip
 from scapy.all import sniff, TCP, IP, conf
+from threading import Timer, Lock
 from utils.parsing import parse_size
-
-# Prepare for LED strip when uncommented
-# import board
-# from led.strip import ledstrip
 
 
 class LedSniffer:
@@ -15,7 +13,7 @@ class LedSniffer:
     with debounce functionality to prevent constant flickering."""
 
     DEFAULT_LED_COUNT = 30
-    DEFAULT_LED_STRIP_CONTROL_PIN = 18  # board.d18
+    DEFAULT_LED_STRIP_CONTROL_PIN = board.D18
     DEFAULT_DATA_THRESHOLD = 1024  # Bytes of data to trigger LED (1KB)
     DEFAULT_INACTIVITY_TIMEOUT = 3.0  # Seconds before LEDs turn off
 
@@ -38,11 +36,10 @@ class LedSniffer:
         # Setup logging
         self.logger = self._setup_logging(log_level)
 
-        # Initialize LED strip (commented out until hardware is connected)
-        # self.led_strip = ledstrip(
-        #     self.led_strip_control_pin,
-        #     led_count=self.led_count
-        # )
+        self.led_strip = LEDStrip(
+            self.led_strip_control_pin,
+            led_count=self.led_count,
+        )
 
         # Debounce state variables
         self.data_volume = 0
@@ -133,6 +130,7 @@ class LedSniffer:
             f"{current_data}/{self.data_threshold} bytes reached)"
         )
         self.logger.info(log_msg)
+        self.led_strip.on()
 
     def _turn_off_leds(self):
         """Turn off the LED strip and reset data volume counter."""
@@ -147,6 +145,7 @@ class LedSniffer:
         if data_seen > 0:
             log_msg = f"LEDS turning off - ({data_seen} bytes processed)"
             self.logger.info(log_msg)
+            self.led_strip.off()
 
     def sniff(self, iface=None, timeout=None):
         """Start sniffing TCP traffic to/from the specified port."""
