@@ -3,6 +3,7 @@ import logging
 import argparse
 from threading import Timer, Lock
 from scapy.all import sniff, TCP, IP, conf
+from utils.parsing import parse_size
 
 # Prepare for LED strip when uncommented
 # import board
@@ -16,7 +17,7 @@ class LedSniffer:
     DEFAULT_LED_COUNT = 30
     DEFAULT_LED_STRIP_CONTROL_PIN = 18  # board.d18
     DEFAULT_DATA_THRESHOLD = 1024  # Bytes of data to trigger LED (1KB)
-    DEFAULT_INACTIVITY_TIMEOUT = 3.0  # Seconds of no packets before LEDs turn off
+    DEFAULT_INACTIVITY_TIMEOUT = 3.0  # Seconds before LEDs turn off
 
     def __init__(
         self,
@@ -56,100 +57,96 @@ class LedSniffer:
 
         if not logger.handlers:
             handler = logging.StreamHandler()
-            formatter = logging.Formatter(
-                "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-            )
+            fmt = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            formatter = logging.Formatter(fmt)
             handler.setFormatter(formatter)
             logger.addHandler(handler)
 
         return logger
 
     def _handle_packet(self, pkt):
-        """Process captured TCP packets and trigger LED if data threshold is met."""
-        if IP in pkt and TCP in pkt:
-            try:
-                src = pkt[IP].src
-                dst = pkt[IP].dst
-                sport = pkt[TCP].sport
-                dport = pkt[TCP].dport
-                flags = pkt[TCP].flags
+        """Process captured TCP packets and trigger LED if threshold is met."""
+        if IP not in pkt or TCP not in pkt:
+            return
 
-                # Calculate actual payload size
-                payload_len = len(pkt[TCP].payload)
+        try:
+            src = pkt[IP].src
+            dst = pkt[IP].dst
+            sport = pkt[TCP].sport
+            dport = pkt[TCP].dport
+            flags = pkt[TCP].flags
 
-                # Log packet info outside the lock to avoid holding lock during I/O
-                self.logger.debug(
-                    f"{src}:{sport} → {dst}:{dport} | "
-                    f"Flags={flags} | Payload={payload_len} bytes"
+            # Calculate actual payload size
+            payload_len = len(pkt[TCP].payload)
+
+            # Log packet info outside the lock
+            log_msg = (
+                f"{src}:{sport} → {dst}:{dport} | "
+                f"Flags={flags} | Payload={payload_len} bytes"
+            )
+            self.logger.debug(log_msg)
+
+            old_timer = None
+
+            with self.lock:
+                # Store reference to old timer
+                old_timer = self.timer
+                self.timer = None
+
+                # Add data size
+                self.data_volume += payload_len
+                should_turn_on = (
+                    not self.led_active and self.data_volume >= self.data_threshold
                 )
 
-                # Minimize the critical section - only lock when updating shared state
-                old_timer = None
-                with self.lock:
-                    # Store reference to old timer
-                    old_timer = self.timer
-                    self.timer = None
+            # Cancel any existing timer outside the lock
+            if old_timer:
+                old_timer.cancel()
 
-                    # Add data size
-                    self.data_volume += payload_len
-                    should_turn_on = (
-                        not self.led_active and self.data_volume >= self.data_threshold
-                    )
+            # Create new timer outside the lock
+            new_timer = Timer(self.inactivity_timeout, self._turn_off_leds)
+            new_timer.daemon = True
 
-                # Cancel any existing timer outside the lock
-                if old_timer:
-                    old_timer.cancel()
+            # Update timer reference with lock
+            with self.lock:
+                self.timer = new_timer
 
-                # Create new timer outside the lock
-                new_timer = Timer(self.inactivity_timeout, self._turn_off_leds)
-                new_timer.daemon = True
+            # Start timer outside lock
+            self.timer.start()
 
-                # Update timer reference with lock
-                with self.lock:
-                    self.timer = new_timer
+            # Turn on LEDs if needed
+            if should_turn_on:
+                self._turn_on_leds()
 
-                # Start timer outside lock
-                self.timer.start()
-
-                # Turn on LEDs if needed
-                if should_turn_on:
-                    self._turn_on_leds()
-
-            except Exception as e:
-                self.logger.error(f"Error processing packet: {e}")
+        except Exception as e:
+            self.logger.error(f"Error processing packet: {e}")
 
     def _turn_on_leds(self):
         """Turn on the LED strip."""
-        # Acquire lock to check and update LED state
         with self.lock:
             if not self.led_active:
                 self.led_active = True
                 current_data = self.data_volume  # Capture for logging
 
-        # Log outside the lock
-        self.logger.info(
-            f"LEDS lighting up (data threshold {current_data}/{self.data_threshold} bytes reached)"
+        log_msg = (
+            f"LEDS lighting up (data threshold "
+            f"{current_data}/{self.data_threshold} bytes reached)"
         )
-        # When actual hardware is connected:
-        # self.led_strip.on(color=(255, 0, 0))  # Red light
+        self.logger.info(log_msg)
 
     def _turn_off_leds(self):
         """Turn off the LED strip and reset data volume counter."""
-        # Acquire lock to check and update LED state
         data_seen = 0
+
         with self.lock:
             if self.led_active:
                 self.led_active = False
                 data_seen = self.data_volume
                 self.data_volume = 0
 
-        # Only log if LEDs were actually turned off
         if data_seen > 0:
-            self.logger.info(
-                f"LEDS turning off - inactivity timeout ({data_seen} bytes processed)"
-            )
-            # When actual hardware is connected:
-            # self.led_strip.off()
+            log_msg = f"LEDS turning off - ({data_seen} bytes processed)"
+            self.logger.info(log_msg)
 
     def sniff(self, iface=None, timeout=None):
         """Start sniffing TCP traffic to/from the specified port."""
@@ -158,11 +155,13 @@ class LedSniffer:
 
         selected_iface = iface or conf.iface
         self.logger.info(f"Capturing on iface={selected_iface} filter='{bpf_filter}'")
-        self.logger.info(
+
+        status_msg = (
             f"Monitoring port {self.port} - LED will activate after "
             f"{self.data_threshold} bytes and deactivate after "
             f"{self.inactivity_timeout}s of inactivity"
         )
+        self.logger.info(status_msg)
 
         if os.geteuid() != 0:
             self.logger.warning("Not running as root. Packet capture may fail!")
@@ -191,29 +190,6 @@ class LedSniffer:
                 timer.cancel()
 
 
-# Helper function to parse sizes with suffixes
-def parse_size(size_str):
-    """Parse size strings like '1K', '2M', etc."""
-    if not isinstance(size_str, str):
-        return size_str
-
-    size_str = size_str.upper()
-    multipliers = {"K": 1024, "M": 1024 * 1024, "G": 1024 * 1024 * 1024}
-
-    for suffix, multiplier in multipliers.items():
-        if size_str.endswith(suffix):
-            try:
-                return int(float(size_str[:-1]) * multiplier)
-            except ValueError:
-                raise argparse.ArgumentTypeError(f"Invalid size format: {size_str}")
-
-    # If no suffix, try to convert directly to int
-    try:
-        return int(size_str)
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"Invalid size format: {size_str}")
-
-
 def main():
     """Entry point for the application."""
     parser = argparse.ArgumentParser(
@@ -230,9 +206,9 @@ def main():
     parser.add_argument(
         "-t",
         "--threshold",
-        type=parse_size,  # Use our custom parser
+        type=parse_size,
         default=LedSniffer.DEFAULT_DATA_THRESHOLD,
-        help="Bytes of data needed to trigger LED (can use K, M, G suffixes)",
+        help="Bytes needed to trigger LED (can use K, M, G suffixes)",
     )
     parser.add_argument(
         "-d",
