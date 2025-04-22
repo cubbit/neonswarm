@@ -21,3 +21,12 @@ def parse_size(size_str):
         return int(size_str)
     except ValueError:
         raise argparse.ArgumentTypeError(f"Invalid size format: {size_str}")
+
+
+def sizeof(num, suffix="B"):
+    """Convert a size in bytes to a human‑readable string."""
+    for unit in ["", "K", "M", "G", "T", "P", "E", "Z"]:
+        if abs(num) < 1024.0:
+            return f"{num:3.1f}{unit}{suffix}"
+        num /= 1024.0
+    return f"{num:.1f}Y{suffix}"
