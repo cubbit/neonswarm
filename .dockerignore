@@ -1,0 +1,8 @@
+# ignore Python artifacts
+**/__pycache__
+**/*.py[cod]
+# ignore your built eggs/distros
+libs/build
+libs/src/utils.egg-info
+storage-node/led_sniffer/src/led_sniffer.egg-info
+

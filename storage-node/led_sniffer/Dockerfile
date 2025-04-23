@@ -1,27 +1,25 @@
-# syntax=docker/dockerfile:1
 FROM python:3.11-slim
 
-# ── Install system deps for Scapy & build tools ────────────────────────────────
 RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      build-essential libpcap-dev \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      build-essential \
+      libpcap-dev \
+      i2c-tools \
+      libgpiod2 \
+      python3-smbus \
+      python3-rpi.gpio \
  && pip install --upgrade pip setuptools wheel \
  && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
-
-# ── Copy & install your shared utils lib ──────────────────────────────────────
-COPY libs /app/libs
-RUN pip install --no-cache-dir -e libs
-
-# ── Copy & install the led_sniffer service ────────────────────────────────────
-COPY storage-node/led_sniffer /app/storage-node/led_sniffer
-WORKDIR /app/storage-node/led_sniffer
+WORKDIR /app/libs
+COPY libs/pyproject.toml    /app/libs/pyproject.toml
+COPY libs/src               /app/libs/src
 RUN pip install --no-cache-dir -e .
 
-# ── Final entrypoint ───────────────────────────────────────────────────────────
-# 
-# Now that pip has installed led-sniffer, the 'led-sniffer' script will
-# live in /usr/local/bin and be on $PATH.
-ENTRYPOINT ["/bin/bash"]
+WORKDIR /app/led_sniffer
+COPY storage-node/led_sniffer/pyproject.toml  /app/led_sniffer/pyproject.toml
+COPY storage-node/led_sniffer/src            /app/led_sniffer/src
+RUN pip install --no-cache-dir -e .
+
+ENTRYPOINT ["led-sniffer"]
 CMD []

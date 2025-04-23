@@ -3,14 +3,12 @@ name = "led-sniffer"
 version = "1.0.0"
 description = "TCP packet sniffer with LED notifications"
 authors = [
-  { name = "marmos91", email = "marco.moschettini@cubbit.io" }
+  { name = "marmos91", email = "hello@cubbit.io" }
 ]
 license = { text = "MIT" }
 readme = "../README.md"
 requires-python = ">=3.11,<4.0"
 dependencies = [
-  # shared utils library must be installed before or as editable
-  "utils @ file://../../libs",
   "scapy>=2.6.1,<2.7",
   "adafruit-blinka>=7.0.0",
   "lgpio>=0.2.2.0,<0.3.0.0",
@@ -24,7 +22,7 @@ dependencies = [
 ]
 
 [project.scripts]
-led-sniffer = "led_sniffer.led_sniffer:main"
+led-sniffer = "led_sniffer:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
