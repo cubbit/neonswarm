@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "utils"
+version = "0.1.0"
+description = "Shared utility functions (parsing, formatting, etc.)"
+authors = [
+  { name = "Marco Moschettini", email = "hello@cubbit.io" }
+]
+requires-python = ">=3.7"
+# no external dependencies
+dependencies = []
+
+[tool.setuptools]
+# tell setuptools your code lives under src/
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+# look for packages under src/
+where = ["src"]
