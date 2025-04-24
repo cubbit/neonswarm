@@ -1,0 +1,25 @@
+# Image settings
+image:
+  repository: cubbit/neonswarm-lcd-storage
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Command-line args
+path: "/"
+address: "0x27"
+interval: 10.0
+
+# Optional verbosity
+verbose: false
+
+# Host-device mount for I²C
+devices:
+  - name: i2c-bus
+    hostPath: /dev/i2c-1
+
+# If you need a private registry:
+imagePullSecrets:
+  - name: regcred
+
+resources: {}
+

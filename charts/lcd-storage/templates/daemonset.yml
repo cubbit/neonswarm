@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "lcd-storage.fullname" . }}
+  labels:
+    app: {{ include "lcd-storage.fullname" . }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ include "lcd-storage.fullname" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "lcd-storage.fullname" . }}
+    spec:
+      affinity:
+        nodeAffinity:
+{{ toYaml .Values.global.nodeAffinity | indent 10 }}
+{{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{ toYaml .Values.imagePullSecrets | indent 8 }}
+{{- end }}
+      containers:
+      - name: lcd-storage
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+        securityContext:
+          privileged: true
+        command: ["lcd-storage"]
+        args:
+          - "{{ .Values.path }}"
+          - "--address"
+          - "{{ .Values.address }}"
+          - "--interval"
+          - "{{ .Values.interval }}"
+{{- if .Values.verbose }}
+          - "--verbose"
+{{- end }}
+
+{{- if .Values.devices }}
+        volumeMounts:
+{{- range .Values.devices }}
+          - name: {{ .name }}
+            mountPath: {{ .hostPath }}
+{{- end }}
+{{- end }}
+{{- if .Values.devices }}
+      volumes:
+{{- range .Values.devices }}
+      - name: {{ .name }}
+        hostPath:
+          path: {{ .hostPath }}
+{{- end }}
+{{- end }}
+      restartPolicy: Always

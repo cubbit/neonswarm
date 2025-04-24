@@ -1,4 +1,3 @@
-
 apiVersion: v2
 name: neonswarm
 description: Umbrella chart for all neonswarm micro-apps
@@ -9,3 +8,6 @@ dependencies:
   - name: led-sniffer
     version: 1.0.0
     repository: "file://charts/led-sniffer"
+  - name: lcd-storage
+    version: 1.0.0
+    repository: file://charts/lcd-storage

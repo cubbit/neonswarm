@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-lcd-storage = "lcd_storage.lcd_storage:main"
+lcd-storage = "lcd_storage:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

@@ -13,6 +13,9 @@ spec:
       labels:
         app: {{ include "led-sniffer.fullname" . }}
     spec:
+      affinity:
+        nodeAffinity:
+{{ toYaml .Values.global.nodeAffinity | indent 10 }}
       {{- if .Values.imagePullSecrets }}
       imagePullSecrets:
       {{ toYaml .Values.imagePullSecrets | indent 8 }}
