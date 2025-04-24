@@ -5,5 +5,8 @@ dependencies:
 - name: lcd-storage
   repository: file://charts/lcd-storage
   version: 1.0.0
-digest: sha256:e56c60bfdefb79955f28ec7b4ec566b32234dd4abe56af5bdd848b4428094b63
-generated: "2025-04-24T13:53:50.016116+02:00"
+- name: agent
+  repository: file://charts/agent
+  version: 1.0.0
+digest: sha256:3c29b7b1db7a4a35135030532ae225bfc79a1115f6a77157157213c1c3044720
+generated: "2025-04-24T17:28:06.48034+02:00"

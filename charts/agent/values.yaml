@@ -1,0 +1,14 @@
+
+swarm:
+  - name: agent1
+    secret: 76823794b06764236ecd03fb82a90e61160c430edddb8369e75dad32a67bd57883ca6919c73fa9558950b91ce7ce71c406ff4c64ed7e22df6b45ef87daa019a6
+    machineId: 4a0b96fe-43e6-4dc4-a967-9e06a7ec4c32
+    nodeName: pi-storage1
+  - name: agent2
+    secret: 48b00a9d3846cf4e83f16f13033f796c359f1984a4c565eafec22eca5fb76dfc67046d301c5892075666624e6b6481a296a8644ef1bdc2061cdff86b7888aa54
+    machineId: d89dc7e7-a0d1-4fda-9b22-6d6676990290
+    nodeName: pi-storage2
+  - name: agent3
+    secret: 5f6d5844640682d59f086208b9aa89325a55d4a8a5a9e3bed6df1333bcab8a4426fc6b7da6f35a6681d38f3e406425d4f9a11de83cd85aafca21f311bdd84150
+    machineId: b55f3769-c4f7-4ab8-bd1e-3ff24fc9dc9d
+    nodeName: pi-storage3

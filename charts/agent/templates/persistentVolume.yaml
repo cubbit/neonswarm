@@ -1,7 +1,9 @@
+{{- range .Values.swarm }}
+---
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: agent1-data
+  name: "{{ .name }}-data"
 spec:
   capacity:
     storage: 100G
@@ -19,16 +21,17 @@ spec:
             - key: kubernetes.io/hostname
               operator: In
               values:
-                - pi-storage1
+                - {{ .nodeName }}
 ---
 kind: PersistentVolumeClaim
 apiVersion: v1
 metadata:
-  name: agent1-data-volume
+  name: "{{ .name }}-data-volume"
 spec:
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
       storage: 100G
-  volumeName: agent1-data
+  volumeName: "{{ .name }}-data"
+{{- end }}

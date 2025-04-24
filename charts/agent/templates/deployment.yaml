@@ -1,16 +1,18 @@
+{{- range .Values.swarm }}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: agent1
+  name: {{ .name }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: agent1
+      app: {{ .name }}
   template:
     metadata:
       labels:
-        app: agent1
+        app: {{ .name }}
     spec:
       affinity:
         nodeAffinity:
@@ -20,7 +22,7 @@ spec:
                 - key: kubernetes.io/hostname
                   operator: In
                   values:
-                  - pi-storage1
+                  - {{ .nodeName }} 
       imagePullSecrets: 
         - name: regcred
       containers:
@@ -31,17 +33,18 @@ spec:
         - containerPort: 4000
         env:
           - name: AGENT_SECRET
-            value: 76823794b06764236ecd03fb82a90e61160c430edddb8369e75dad32a67bd57883ca6919c73fa9558950b91ce7ce71c406ff4c64ed7e22df6b45ef87daa019a6
+            value: {{ .secret }}
           - name: MACHINE_ID
-            value: 4a0b96fe-43e6-4dc4-a967-9e06a7ec4c32
+            value: {{ .machineId }}
         volumeMounts:
           - mountPath: /media/shard
-            name: agent1
+            name: {{ .name }}
             subPath: data
           - mountPath: /data/cubbit
-            name: agent1
+            name: {{ .name }}
             subPath: config
       volumes:
-        - name: agent1
+        - name: {{ .name }}
           persistentVolumeClaim:
-            claimName: agent1-data-volume
+            claimName: "{{ .name }}-data-volume"
+{{- end }} 
