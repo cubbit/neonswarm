@@ -2,7 +2,7 @@ apiVersion: v2
 name: neonswarm
 description: Umbrella chart for all neonswarm micro-apps
 type: application
-version: 0.1.0
+version: 1.0.0
 kubeVersion: ">=1.20.0-0"
 dependencies:
   - name: led-sniffer
