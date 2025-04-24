@@ -1,0 +1,27 @@
+[project]
+name = "lcd-storage"
+version = "1.0.0"
+description = "I2C LCD controller polling for storage capacity"
+authors = [
+  { name = "marmos91", email = "hello@cubbit.io" }
+]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.11,<4.0"
+dependencies = [
+  "rplcd>=1.4.0,<2.0.0",
+  "smbus2>=0.5.0",
+]
+
+[project.scripts]
+lcd-storage = "lcd_storage.lcd_storage:main"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

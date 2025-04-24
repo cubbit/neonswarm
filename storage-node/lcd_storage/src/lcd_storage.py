@@ -19,6 +19,7 @@ DEFAULT_I2C_ADDRESS = 0x27
 DEFAULT_INTERVAL = 10.0
 LCD_COLS = 16
 LCD_ROWS = 2
+DEFAULT_PATH = "/"
 
 
 class LCDDiskMonitor:
@@ -94,7 +95,10 @@ def main():
         description=("Display used/total storage on a 16×2 I2C LCD" " with logging.")
     )
     parser.add_argument(
-        "path", help=("Mount point or path to check (e.g. /, /mnt/data, C:\\).")
+        "path",
+        type=str,
+        default=DEFAULT_PATH,
+        help=("Mount point or path to check (e.g. /, /mnt/data, C:\\)."),
     )
     parser.add_argument(
         "-a",
@@ -126,7 +130,9 @@ def main():
     )
 
     monitor = LCDDiskMonitor(
-        path=args.path, i2c_addr=args.address, interval=args.interval
+        path=args.path,
+        i2c_addr=args.address,
+        interval=args.interval,
     )
     monitor.start()
 
