@@ -1,0 +1,22 @@
+image:
+  repository: cubbit/neonswarm-led-sniffer
+  tag: latest
+  pullPolicy: IfNotPresent
+port: 4000
+threshold: 1K
+delay: 3.0
+interface: ""
+hostNetwork: false
+privileged: true
+
+imagePullSecrets:
+  - name: regcred
+
+devices:
+  - name: gpiomem
+    hostPath: /dev/gpiomem
+  - name: spidev
+    hostPath: /dev/spidev10.0
+
+resources: {}
+

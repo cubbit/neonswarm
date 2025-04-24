@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "led-sniffer.fullname" . }}
+  labels:
+    app: {{ include "led-sniffer.fullname" . }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ include "led-sniffer.fullname" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "led-sniffer.fullname" . }}
+    spec:
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+      {{ toYaml .Values.imagePullSecrets | indent 8 }}
+      {{- end }}
+      {{- if .Values.hostNetwork }}
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- end }}
+      containers:
+        - name: led-sniffer
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: {{ .Values.privileged }}
+          env:
+            - name: PORT
+              value: "{{ .Values.port }}"
+            - name: THRESHOLD
+              value: "{{ .Values.threshold }}"
+            - name: DELAY
+              value: "{{ .Values.delay }}"
+          args:
+            - "--interface"
+            - "{{ .Values.interface }}"
+          volumeMounts:
+            {{- range .Values.devices }}
+            - name: {{ .name }}
+              mountPath: {{ .hostPath }}
+            {{- end }}
+      volumes:
+        {{- range .Values.devices }}
+        - name: {{ .name }}
+          hostPath:
+            path: {{ .hostPath }}
+        {{- end }}
+      restartPolicy: Always

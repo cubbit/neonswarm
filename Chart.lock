@@ -1,0 +1,6 @@
+dependencies:
+- name: led-sniffer
+  repository: file://charts/led-sniffer
+  version: 1.0.0
+digest: sha256:1140e1939a4539a7caedcc377e111592d7df0ef00409ed47bb9f49f2262b2fca
+generated: "2025-04-24T11:55:07.982558+02:00"
