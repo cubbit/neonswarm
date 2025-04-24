@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agent1
+  template:
+    metadata:
+      labels:
+        app: agent1
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                - key: kubernetes.io/hostname
+                  operator: In
+                  values:
+                  - pi-storage1
+      imagePullSecrets: 
+        - name: regcred
+      containers:
+      - name: agent
+        image: cubbit/agent:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 4000
+        env:
+          - name: AGENT_SECRET
+            value: 76823794b06764236ecd03fb82a90e61160c430edddb8369e75dad32a67bd57883ca6919c73fa9558950b91ce7ce71c406ff4c64ed7e22df6b45ef87daa019a6
+          - name: MACHINE_ID
+            value: 4a0b96fe-43e6-4dc4-a967-9e06a7ec4c32
+        volumeMounts:
+          - mountPath: /media/shard
+            name: agent1
+            subPath: data
+          - mountPath: /data/cubbit
+            name: agent1
+            subPath: config
+      volumes:
+        - name: agent1
+          persistentVolumeClaim:
+            claimName: agent1-data-volume
