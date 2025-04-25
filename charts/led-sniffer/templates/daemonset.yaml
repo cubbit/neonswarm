@@ -27,7 +27,7 @@ spec:
       containers:
         - name: led-sniffer
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
           securityContext:
             privileged: {{ .Values.privileged }}
           env:
@@ -38,8 +38,15 @@ spec:
             - name: DELAY
               value: "{{ .Values.delay }}"
           args:
+            {{- if .Values.source }}
+            - "--source"
+            - "{{ .Values.source }}"
+            {{- end }}
             - "--interface"
             - "{{ .Values.interface }}"
+            {{- if .Values.verbose }}
+            - "--verbose"
+            {{- end }} 
           volumeMounts:
             {{- range .Values.devices }}
             - name: {{ .name }}

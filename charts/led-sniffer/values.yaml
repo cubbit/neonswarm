@@ -1,12 +1,16 @@
 image:
   repository: cubbit/neonswarm-led-sniffer
   tag: latest
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
+
+source: 192.168.1.101
 port: 4000
 threshold: 1K
 delay: 3.0
 interface: ""
-hostNetwork: false
+verbose: false
+
+hostNetwork: true
 privileged: true
 
 imagePullSecrets:

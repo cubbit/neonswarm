@@ -2,7 +2,7 @@
 image:
   repository: cubbit/neonswarm-lcd-storage
   tag: latest
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 # Command-line args
 path: "/"

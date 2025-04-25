@@ -21,6 +21,7 @@ class LedSniffer:
 
     def __init__(
         self,
+        host,
         port,
         led_count=DEFAULT_LED_COUNT,
         led_strip_control_pin=DEFAULT_LED_STRIP_CONTROL_PIN,
@@ -29,6 +30,7 @@ class LedSniffer:
         log_level=logging.INFO,
     ):
         """Initialize the LED sniffer with the specified parameters."""
+        self.host = host
         self.port = int(port)
         self.led_count = led_count
         self.led_strip_control_pin = led_strip_control_pin
@@ -152,7 +154,11 @@ class LedSniffer:
     def sniff(self, iface=None, timeout=None):
         """Start sniffing TCP traffic to/from the specified port."""
         # Filter packets that carry actual data (PSH bit set)
-        bpf_filter = f"tcp port {self.port} and tcp[13] & 0x08 != 0"
+        bpf_filter = f"tcp src port {self.port} and tcp[13] & 0x08 != 0"
+
+        # Restrict the host
+        if self.host:
+            bpf_filter += f" and src host {self.host}"
 
         selected_iface = iface or conf.iface
         self.logger.info(f"Capturing on iface={selected_iface} filter='{bpf_filter}'")
@@ -197,11 +203,18 @@ def main():
         description="TCP packet sniffer with LED notification"
     )
     parser.add_argument(
+        "-s",
+        "--source",
+        type=str,
+        default=None,
+        help="Source host to sniff packets from",
+    )
+    parser.add_argument(
         "-p",
         "--port",
         type=int,
         default=int(os.environ.get("PORT", 4000)),
-        help="TCP port to monitor",
+        help="Source TCP port to monitor",
     )
     parser.add_argument("-i", "--interface", help="Network interface to capture on")
     parser.add_argument(
@@ -226,6 +239,7 @@ def main():
     log_level = logging.DEBUG if args.verbose else logging.INFO
 
     sniffer = LedSniffer(
+        host=args.source,
         port=args.port,
         data_threshold=args.threshold,
         inactivity_timeout=args.delay,
