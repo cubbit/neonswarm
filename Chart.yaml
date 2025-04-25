@@ -8,9 +8,12 @@ dependencies:
   - name: led-sniffer
     version: 1.0.0
     repository: "file://charts/led-sniffer"
+    condition: led-sniffer.enabled
   - name: lcd-storage
     version: 1.0.0
     repository: file://charts/lcd-storage
+    condition: lcd_storage.enabled
   - name: agent
     version: 1.0.0
     repository: file://charts/agent
+    condition: agent.enabled

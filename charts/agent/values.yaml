@@ -1,4 +1,13 @@
+image:
+  repository: cubbit/agent
+  tag: latest
+  pullPolicy: Always
+
+port: 4000
+
 swarm:
+  enabled: true
+  agents:
   - name: agent1
     secret: 76823794b06764236ecd03fb82a90e61160c430edddb8369e75dad32a67bd57883ca6919c73fa9558950b91ce7ce71c406ff4c64ed7e22df6b45ef87daa019a6
     machineId: 4a0b96fe-43e6-4dc4-a967-9e06a7ec4c32

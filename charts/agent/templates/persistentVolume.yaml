@@ -1,4 +1,4 @@
-{{- range .Values.swarm }}
+{{- range .Values.swarm.agents }}
 ---
 apiVersion: v1
 kind: PersistentVolume
