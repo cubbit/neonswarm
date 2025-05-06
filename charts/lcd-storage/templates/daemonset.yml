@@ -27,6 +27,11 @@ spec:
         securityContext:
           privileged: true
         command: ["lcd-storage"]
+        env:
+          - name: NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
         args:
           - "{{ .Values.path }}"
           - "--address"
@@ -52,4 +57,5 @@ spec:
           path: {{ .hostPath }}
 {{- end }}
 {{- end }}
+      serviceAccountName: lcd-storage-sa
       restartPolicy: Always

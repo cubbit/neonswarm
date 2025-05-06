@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: lcd-storage-reader-binding
+  namespace: neonswarm
+subjects:
+  - kind: ServiceAccount
+    name: lcd-storage-sa
+    namespace: neonswarm
+roleRef:
+  kind: Role
+  name: lcd-storage-reader
+  apiGroup: rbac.authorization.k8s.io
+
