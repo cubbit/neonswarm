@@ -6,6 +6,7 @@ RUN apt-get update \
       libpcap-dev \
       i2c-tools \
       libgpiod2 \
+      python3-libgpiod \
       python3-smbus \
       python3-smbus2 \
       python3-rpi.gpio \

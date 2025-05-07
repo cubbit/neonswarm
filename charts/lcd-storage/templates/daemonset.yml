@@ -25,7 +25,7 @@ spec:
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
         imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
         securityContext:
-          privileged: true
+          privileged: {{ .Values.privileged }}
         command: ["lcd-storage"]
         env:
           - name: NODE_NAME
@@ -46,7 +46,10 @@ spec:
         volumeMounts:
 {{- range .Values.devices }}
           - name: {{ .name }}
-            mountPath: {{ .hostPath }}
+            mountPath: {{ .mountPath }}
+            {{- if .readOnly }}
+            readOnly: {{ .readOnly }}
+            {{- end }}
 {{- end }}
 {{- end }}
 {{- if .Values.devices }}
@@ -55,6 +58,9 @@ spec:
       - name: {{ .name }}
         hostPath:
           path: {{ .hostPath }}
+          {{- if .type }}
+          type: {{ .type }}
+          {{- end }}
 {{- end }}
 {{- end }}
       serviceAccountName: lcd-storage-sa

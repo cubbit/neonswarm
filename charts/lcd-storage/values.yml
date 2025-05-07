@@ -10,12 +10,19 @@ address: "0x27"
 interval: 10.0
 
 # Optional verbosity
-verbose: false
+verbose: true
+
+privileged: true
 
 # Host-device mount for I²C
 devices:
   - name: i2c-bus
     hostPath: /dev/i2c-1
+    mountPath: /dev/i2c-1
+  - name: gpiochip4
+    hostPath: /dev/gpiochip4
+    mountPath: /dev/gpiochip4
+    type: CharDevice
 
 # If you need a private registry:
 imagePullSecrets:

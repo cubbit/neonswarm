@@ -4,6 +4,12 @@
 Continuously display disk usage on a 16×2 I2C LCD with optional logging.
 """
 
+from gpiozero import Device  # noqa: E402
+from gpiozero.pins.lgpio import LGPIOFactory
+
+# tell gpiozero which backend to use, *before* importing Button
+Device.pin_factory = LGPIOFactory()  # noqa: E402
+
 import argparse
 import logging
 import shutil
@@ -14,7 +20,7 @@ from kubernetes import client, config
 
 from RPLCD.i2c import CharLCD
 from utils.parsing import sizeof
-
+from gpiozero import Button
 
 # Default configuration constants
 DEFAULT_I2C_ADDRESS = 0x27
@@ -23,6 +29,9 @@ LCD_COLS = 16
 LCD_ROWS = 2
 DEFAULT_PATH = "/"
 DEFAULT_NAMESPACE = "neonswarm"
+DEFAULT_BUTTON_PIN = 17  # GPIO pin for the button
+GPIOCHIP = "gpiochip0"  # GPIO interface
+DEFAULT_BUTTON_BOUNCE_TIME = 0.05  # Button debounce in ms
 
 
 class LCDDiskMonitor:
@@ -34,6 +43,7 @@ class LCDDiskMonitor:
         i2c_addr=DEFAULT_I2C_ADDRESS,
         interval=DEFAULT_INTERVAL,
         namespace=DEFAULT_NAMESPACE,
+        button_pin=DEFAULT_BUTTON_PIN,
     ):
         self._path = path
         self._interval = interval
@@ -46,11 +56,76 @@ class LCDDiskMonitor:
             interval,
         )
 
+        # Kubernetes setup and pick the per-node agent Deployment
+        self._setup_k8s()
+
         self._lcd = CharLCD(
             i2c_expander="PCF8574", address=i2c_addr, cols=LCD_COLS, rows=LCD_ROWS
         )
 
-        self._setup_k8s()
+        self._button = self._setup_button(button_pin)
+
+    def _setup_button(self, pin):
+        button = Button(
+            pin,
+            pull_up=True,
+            bounce_time=DEFAULT_BUTTON_BOUNCE_TIME,
+        )
+        button.when_pressed = self._on_button_pressed
+        button.when_released = self._on_button_released
+
+        return button
+
+    def _on_button_pressed(self):
+        logging.info(
+            "Button pressed → scaling %s → 1 replica",
+            self._deployment_name,
+        )
+
+        self._set_deployment_replicas(
+            self._deployment_name,
+            self._namespace,
+            1,
+        )
+
+        # Monitor immediately to update the LCD accordingly
+        self._monitor()
+
+    def _on_button_released(self):
+        logging.info(
+            "Button released → scaling %s → 0 replica",
+            self._deployment_name,
+        )
+
+        self._set_deployment_replicas(
+            self._deployment_name,
+            self._namespace,
+            0,
+        )
+
+        # Monitor immediately to update the LCD accordingly
+        self._monitor()
+
+    def _set_deployment_replicas(
+        self,
+        deployment,
+        namespace,
+        replicas,
+    ):
+        try:
+            # patch only the replicas field
+            self._k8s.patch_namespaced_deployment(
+                name=deployment,
+                namespace=namespace,
+                body={"spec": {"replicas": replicas}},
+            )
+        except Exception as e:
+            logging.error(
+                "Failed to scale replicas for %s to %d: %s",
+                deployment,
+                replicas,
+                e,
+            )
 
     def _setup_k8s(self):
         config.load_incluster_config()
@@ -195,6 +270,13 @@ def main():
         type=lambda x: int(x, 0),
         default=DEFAULT_I2C_ADDRESS,
         help="I2C address of the LCD (default: 0x27).",
+    )
+    parser.add_argument(
+        "-b",
+        "--button_pin",
+        type=int,
+        default=DEFAULT_BUTTON_PIN,
+        help="On/Off button gpio pin",
     )
     parser.add_argument(
         "-i",
