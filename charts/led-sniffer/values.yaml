@@ -4,7 +4,7 @@ image:
   pullPolicy: Always
 
 source: 192.168.1.101
-port: 4000
+port: 9171
 threshold: 1K
 delay: 3.0
 interface: ""
