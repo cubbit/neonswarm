@@ -39,13 +39,16 @@ class LedSniffer(Loggable):
         animation_duration: Seconds to run the wave after threshold hit.
     """
 
+    DEFAULT_SNIFF_SOURCE = None
+    DEFAULT_SNIFF_PORT = 4000
+    DEFAULT_SNIFF_IFACE = None
     DEFAULT_SNIFF_INACTIVITY_TIMEOUT_S = 3.0
     DEFAULT_SNIFF_THRESHOLD_BYTES = 1024
 
     DEFAULT_LED_COUNT = 30
-    DEFAULT_LED_PIN = board.D18
+    DEFAULT_LED_PIN = "D18"
 
-    DEFAULT_ANIMATION_COLOR = (0, 101, 255)
+    DEFAULT_ANIMATION_COLOR = "#0065FF"
     DEFAULT_ANIMATION_SPEED = 0.09
     DEFAULT_ANIMATION_SPACING = 3
     DEFAULT_ANIMATION_DURATION_S = 2.0
@@ -165,7 +168,7 @@ def main() -> None:
         "--source",
         dest="host",
         type=str,
-        default=None,
+        default=LedSniffer.DEFAULT_SNIFF_SOURCE,
         help="Source host IP to filter packets",
     )
     parser.add_argument(
@@ -173,7 +176,7 @@ def main() -> None:
         "--port",
         dest="port",
         type=int,
-        default=int(os.environ.get("PORT", 4000)),
+        default=int(os.environ.get("PORT", LedSniffer.DEFAULT_SNIFF_PORT)),
         help="TCP port to monitor",
     )
     parser.add_argument(
@@ -181,7 +184,7 @@ def main() -> None:
         "--interface",
         dest="iface",
         type=str,
-        default=None,
+        default=LedSniffer.DEFAULT_SNIFF_IFACE,
         help="Network interface to capture on",
     )
     parser.add_argument(
@@ -213,14 +216,14 @@ def main() -> None:
         "--led-pin",
         dest="led_pin",
         type=str,
-        default="D18",
+        default=LedSniffer.DEFAULT_LED_PIN,
         help="GPIO pin name for NeoPixel data (e.g. D18)",
     )
     parser.add_argument(
         "--animation-color",
         dest="animation_color",
         type=str,
-        default="#0065FF",
+        default=LedSniffer.DEFAULT_ANIMATION_COLOR,
         help="Wave color as hex string, e.g. '#FF0000' or '00FF00'",
     )
     parser.add_argument(
