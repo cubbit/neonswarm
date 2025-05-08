@@ -17,16 +17,13 @@ class ThresholdSniffer(Loggable):
             Called when the accumulated payload exceeds the threshold.
     """
 
-    DEFAULT_INACTIVITY_TIMEOUT_S: float = 3.0
-    DEFAULT_THRESHOLD_BYTES: int = 1024
-
     def __init__(
         self,
-        host: Optional[str],
         port: int,
+        threshold_bytes: int,
+        inactivity_timeout_s: float,
+        host: Optional[str],
         iface: Optional[str] = None,
-        threshold_bytes: int = DEFAULT_THRESHOLD_BYTES,
-        inactivity_timeout_s: float = DEFAULT_INACTIVITY_TIMEOUT_S,
         log_level: int = logging.INFO,
     ) -> None:
         """
@@ -55,7 +52,7 @@ class ThresholdSniffer(Loggable):
         # User can assign a callback: no‐op by default
         self.on_sniff: Optional[Callable[[], None]] = None
 
-    def _handle_packet(self, pkt) -> None:
+    def _handle_packet(self, packet) -> None:
         """
         Callback for each sniffed packet. Accumulates payload length and
         triggers callback if threshold is reached.
@@ -63,18 +60,18 @@ class ThresholdSniffer(Loggable):
         Args:
             pkt: Packet object from scapy.
         """
-        if IP not in pkt or TCP not in pkt:
+        if IP not in packet or TCP not in packet:
             return
 
         try:
-            payload_len = len(pkt[TCP].payload)
+            payload_len = len(packet[TCP].payload)
             self.logger.debug(
                 "%s:%s → %s:%s | Flags=%s | Payload=%d bytes",
-                pkt[IP].src,
-                pkt[TCP].sport,
-                pkt[IP].dst,
-                pkt[TCP].dport,
-                pkt[TCP].flags,
+                packet[IP].src,
+                packet[TCP].sport,
+                packet[IP].dst,
+                packet[TCP].dport,
+                packet[TCP].flags,
                 payload_len,
             )
 

@@ -104,7 +104,11 @@ class LEDStrip:
 
         # Configure and start animation
         self._animation = ReverseChase(
-            self._strip, speed=speed, color=color, spacing=spacing, reverse=reverse
+            self._strip,
+            speed=speed,
+            color=color,
+            spacing=spacing,
+            reverse=reverse,
         )
         self._running.set()
         self._status = "wave"
