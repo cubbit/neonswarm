@@ -28,6 +28,7 @@ apiVersion: v1
 metadata:
   name: "{{ .name }}-data-volume"
 spec:
+  storageClassName: local-path
   accessModes:
     - ReadWriteOnce
   resources:
