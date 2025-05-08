@@ -65,6 +65,10 @@ class ThresholdSniffer(Loggable):
 
         try:
             payload_len = len(packet[TCP].payload)
+
+            if payload_len < 20:
+                return
+
             self.logger.debug(
                 "%s:%s → %s:%s | Flags=%s | Payload=%d bytes",
                 packet[IP].src,
