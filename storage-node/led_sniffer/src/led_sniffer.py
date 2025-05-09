@@ -44,6 +44,7 @@ class LedSniffer(Loggable):
     DEFAULT_SNIFF_IFACE = None
     DEFAULT_SNIFF_INACTIVITY_TIMEOUT_S = 3.0
     DEFAULT_SNIFF_THRESHOLD_BYTES = 1024
+    DEFAULT_SNIFF_SIZE_FILTER_BYTES = 50
 
     DEFAULT_LED_COUNT = 30
     DEFAULT_LED_PIN = "D18"
@@ -60,6 +61,7 @@ class LedSniffer(Loggable):
         sniff_timeout: float,
         sniff_host: Optional[str],
         sniff_iface: Optional[str],
+        sniff_size_filter_bytes: Optional[int],
         led_count: int,
         led_pin,
         animation_color: Tuple[int, int, int],
@@ -76,6 +78,7 @@ class LedSniffer(Loggable):
         :param sniff_timeout: Inactivity timeout (seconds) to reset counter.
         :param sniff_host: Optional host IP to filter.
         :param sniff_iface: Optional interface to capture on.
+        :param sniff_size_filter_bytes: The size of the minimum packet size to consider for the sniff.
         :param led_count: Number of LEDs in the NeoPixel strip.
         :param led_pin: GPIO pin for NeoPixel data.
         :param animation_color: RGB for wave animation.
@@ -85,12 +88,6 @@ class LedSniffer(Loggable):
         :param log_level: Python logging level.
         """
         super().__init__(log_level)
-
-        self.sniff_port = sniff_port
-        self.sniff_threshold = sniff_threshold
-        self.sniff_timeout = sniff_timeout
-        self.sniff_host = sniff_host
-        self.sniff_iface = sniff_iface
 
         self.animation_color = animation_color
         self.animation_speed = animation_speed
@@ -102,11 +99,13 @@ class LedSniffer(Loggable):
             port=sniff_port,
             threshold_bytes=sniff_threshold,
             inactivity_timeout_s=sniff_timeout,
+            size_filter_bytes=sniff_size_filter_bytes,
             host=sniff_host,
             iface=sniff_iface,
             log_level=log_level,
         )
-        self._sniffer.on_sniff = self._on_threshold_hit
+        self._sniffer.on_start_sniffing = self._start_animation
+        self._sniffer.on_stop_sniffing = self._stop_animation
 
         # --- set up the LED strip ---
         self.led_strip = LEDStrip(pin=led_pin, led_count=led_count)
@@ -122,30 +121,29 @@ class LedSniffer(Loggable):
         sleep(1.0)
         self.led_strip.off()
 
-    def _on_threshold_hit(self) -> None:
+    def _start_animation(self) -> None:
         """
         Internal callback: run a wave animation when byte threshold is reached.
         """
-        self.logger.info("Threshold hit — running wave animation")
+        self.logger.info("Running wave animation")
         self.led_strip.wave(
             speed=self.animation_speed,
             color=self.animation_color,
             spacing=self.animation_spacing,
-            reverse=False,
+            reverse=True,
         )
-        sleep(self.animation_duration)
+
+    def _stop_animation(self) -> None:
+        """
+        Internal callback: stop wave animation
+        """
+        self.logger.info("Stopping wave animation")
         self.led_strip.off()
 
     def start(self) -> None:
         """
         Start the sniffing loop.  Blocks until interrupted.
         """
-        self.logger.info(
-            "Starting sniff on port %d (host=%s, iface=%s)",
-            self.sniff_port,
-            self.sniff_host or "any",
-            self.sniff_iface or "default",
-        )
         self._sniffer.sniff()
 
 
@@ -202,6 +200,14 @@ def main() -> None:
         type=float,
         default=LedSniffer.DEFAULT_SNIFF_INACTIVITY_TIMEOUT_S,
         help="Seconds of inactivity before resetting counter",
+    )
+    parser.add_argument(
+        "-f",
+        "--filter_size",
+        dest="size_filter",
+        type=parse_size,
+        default=LedSniffer.DEFAULT_SNIFF_SIZE_FILTER_BYTES,
+        help="Minimum size for TCP packet to be considered in the sniffing process (e.g. 1K, 2M)",
     )
 
     # LED / animation args
@@ -268,18 +274,30 @@ def main() -> None:
     except AttributeError:
         parser.error(f"Unknown board pin `{args.led_pin}`; use e.g. 'D18', 'D17', etc.")
 
+        # Log runtime configuration
+    logging.debug(
+        f"Starting with configuration: host={args.host or 'any'}, port={args.port}, "
+        f"iface={args.iface or 'default'}, threshold={args.threshold} bytes, "
+        f"timeout={args.timeout} s, filter_size={args.size_filter} bytes, "
+        f"led_count={args.led_count}, led_pin={args.led_pin}, "
+        f"animation_color={args.animation_color}, animation_speed={args.animation_speed}, "
+        f"animation_spacing={args.animation_spacing}, animation_duration={args.animation_duration}"
+    )
+
     sniffer = LedSniffer(
         sniff_port=args.port,
         sniff_threshold=args.threshold,
         sniff_timeout=args.timeout,
         sniff_host=args.host,
         sniff_iface=args.iface,
+        sniff_size_filter_bytes=args.size_filter,
         led_count=args.led_count,
         led_pin=pin,
         animation_color=rgb_color,
         animation_speed=args.animation_speed,
         animation_spacing=args.animation_spacing,
         animation_duration=args.animation_duration,
+        log_level=log_level,
     )
     sniffer.boot()
     sniffer.start()

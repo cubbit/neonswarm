@@ -34,9 +34,9 @@ class ThresholdSniffer(Loggable):
             host: IP address to filter (both src and dst). If None, captures from any host.
             port: TCP port number to monitor.
             iface: Network interface name. If None, scapy's default is used.
-            threshold_bytes: Number of bytes to accumulate before triggering callback.
-            inactivity_timeout_s: Seconds of no packets before resetting the counter.
-            sniff_size_filter_bytes: The size of the minimum packet size to consider for the sniff.
+            threshold_bytes: Number of bytes to accumulate before triggering start callback.
+            inactivity_timeout_s: Seconds of no packets before triggering stop callback.
+            size_filter_bytes: Minimum payload size (in bytes) to consider.
             log_level: Logging level for the internal logger.
         """
         super().__init__(log_level)
@@ -51,17 +51,19 @@ class ThresholdSniffer(Loggable):
         self._data_volume: int = 0
         self._timer: Optional[Timer] = None
         self._lock = Lock()
+        self._sniffing_active = False
 
-        # User can assign a callback: no‐op by default
-        self.on_sniff: Optional[Callable[[], None]] = None
+        # User can assign callbacks
+        self.on_start_sniffing: Optional[Callable[[], None]] = None
+        self.on_stop_sniffing: Optional[Callable[[], None]] = None
 
     def _handle_packet(self, packet) -> None:
         """
         Callback for each sniffed packet. Accumulates payload length and
-        triggers callback if threshold is reached.
+        triggers start callback if threshold is reached.
 
         Args:
-            pkt: Packet object from scapy.
+            packet: Packet object from scapy.
         """
         if IP not in packet or TCP not in packet:
             return
@@ -85,9 +87,17 @@ class ThresholdSniffer(Loggable):
             with self._lock:
                 self._data_volume += payload_len
 
-            if callable(self.on_sniff) and self._data_volume >= self._threshold_bytes:
-                self.on_sniff()
+                # Trigger start callback once when threshold is passed
+                if (
+                    not self._sniffing_active
+                    and self._data_volume >= self._threshold_bytes
+                ):
+                    self._sniffing_active = True
 
+                    if callable(self.on_start_sniffing):
+                        self.on_start_sniffing()
+
+            # Reset inactivity timer on each qualifying packet
             self._reset_timer()
 
         except Exception as e:
@@ -96,7 +106,7 @@ class ThresholdSniffer(Loggable):
     def _reset_timer(self) -> None:
         """
         Cancel any existing inactivity timer and start a new one
-        to reset the byte counter after inactivity_timeout_s.
+        to call stop callback after inactivity_timeout_s.
         """
         with self._lock:
             if self._timer:
@@ -108,16 +118,25 @@ class ThresholdSniffer(Loggable):
 
     def _clean(self) -> None:
         """
-        Reset the accumulated byte counter and cancel the timer.
-        Called after inactivity.
+        Called after inactivity: triggers stop callback and resets state.
         """
         with self._lock:
+            # Only fire stop if we were previously active
+            if self._sniffing_active:
+                self._sniffing_active = False
+
+                if callable(self.on_stop_sniffing):
+                    self.on_stop_sniffing()
+
+            # Reset data volume and timer
             if self._data_volume > 0:
                 self._data_volume = 0
-                if self._timer:
-                    self._timer.cancel()
+
+            if self._timer:
+                self._timer.cancel()
                 self._timer = None
-                self.logger.debug("Data volume reset after inactivity")
+
+            self.logger.debug("Data volume reset after inactivity and stopped sniffing")
 
     def sniff(self) -> None:
         """
@@ -132,7 +151,7 @@ class ThresholdSniffer(Loggable):
         )
 
         # Capture packets in both directions with PSH flag set
-        bpf_filter = f"tcp port {self._port} and tcp[13] & 0x08 != 0"
+        bpf_filter = f"tcp src port {self._port} and tcp[13] & 0x08 != 0"
         if self._host:
             bpf_filter += f" and host {self._host}"
 
@@ -161,4 +180,5 @@ class ThresholdSniffer(Loggable):
         except Exception as e:
             self.logger.error("Capture error: %s", e, exc_info=True)
         finally:
+            # Ensure final cleanup and stop callback if needed
             self._clean()
