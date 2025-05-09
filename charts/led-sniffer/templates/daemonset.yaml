@@ -30,73 +30,38 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
           securityContext:
             privileged: {{ .Values.privileged }}
-          env:
-            - name: PORT
-              value: "{{ .Values.port }}"
-            - name: THRESHOLD
-              value: "{{ .Values.threshold }}"
-            - name: DELAY
-              value: "{{ .Values.delay }}"
           args:
             {{- if .Values.verbose }}
             - "--verbose"
-            {{- end }} 
-
+            {{- end }}
             {{- if .Values.source }}
-            - "--source"
+            - "--source" 
             - "{{ .Values.source }}"
             {{- end }}
-
-            {{- if .Values.port }}
-            - "--port"
+            - "--port" 
             - "{{ .Values.port }}"
-            {{- end }} 
-
-            {{- if .Values.interface }} 
-            - "--interface"
+            {{- if .Values.interface }}
+            - "--interface" 
             - "{{ .Values.interface }}"
-            {{- end}}
-
-            {{- if .Values.threshold }}
-            - "--threshold"
+            {{- end }}
+            - "--threshold" 
             - "{{ .Values.threshold }}"
-            {{- end }} 
-
-            {{- if .Values.delay }}
-            - "--delay"
+            - "--delay" 
             - "{{ .Values.delay }}"
-            {{- end }} 
-
-            {{- if .Values.led_count }}
+            - "--filter_size"
+            - "{{ .Values.filter_size }}"
             - "--led-count"
             - "{{ .Values.led_count }}"
-            {{- end }} 
-
-            {{- if .Values.led_pin }}
             - "--led-pin"
             - "{{ .Values.led_pin }}"
-            {{- end }} 
-
-            {{- if .Values.animation_color }}
             - "--animation-color"
             - "{{ .Values.animation_color }}"
-            {{- end }}
-
-            {{- if .Values.animation_speed }}
             - "--animation-speed"
             - "{{ .Values.animation_speed }}"
-            {{- end }} 
-
-            {{- if .Values.animation_spacing }}
             - "--animation-spacing"
             - "{{ .Values.animation_spacing }}"
-            {{- end }}
-
-            {{- if .Values.animation_duration }}
             - "--animation-duration"
             - "{{ .Values.animation_duration }}"
-            {{- end }} 
-
           volumeMounts:
             {{- range .Values.devices }}
             - name: {{ .name }}
