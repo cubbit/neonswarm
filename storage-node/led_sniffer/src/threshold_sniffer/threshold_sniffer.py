@@ -22,6 +22,7 @@ class ThresholdSniffer(Loggable):
         port: int,
         threshold_bytes: int,
         inactivity_timeout_s: float,
+        size_filter_bytes: Optional[int],
         host: Optional[str],
         iface: Optional[str] = None,
         log_level: int = logging.INFO,
@@ -35,6 +36,7 @@ class ThresholdSniffer(Loggable):
             iface: Network interface name. If None, scapy's default is used.
             threshold_bytes: Number of bytes to accumulate before triggering callback.
             inactivity_timeout_s: Seconds of no packets before resetting the counter.
+            sniff_size_filter_bytes: The size of the minimum packet size to consider for the sniff.
             log_level: Logging level for the internal logger.
         """
         super().__init__(log_level)
@@ -43,6 +45,7 @@ class ThresholdSniffer(Loggable):
         self._port = port
         self._iface = iface
         self._threshold_bytes = threshold_bytes
+        self._size_filter_bytes = size_filter_bytes
         self._inactivity_timeout_s = inactivity_timeout_s
 
         self._data_volume: int = 0
@@ -66,7 +69,7 @@ class ThresholdSniffer(Loggable):
         try:
             payload_len = len(packet[TCP].payload)
 
-            if payload_len < 20:
+            if self._size_filter_bytes and payload_len < self._size_filter_bytes:
                 return
 
             self.logger.debug(
@@ -109,17 +112,25 @@ class ThresholdSniffer(Loggable):
         Called after inactivity.
         """
         with self._lock:
-            self._data_volume = 0
-            if self._timer:
-                self._timer.cancel()
-            self._timer = None
-            self.logger.debug("Data volume reset after inactivity")
+            if self._data_volume > 0:
+                self._data_volume = 0
+                if self._timer:
+                    self._timer.cancel()
+                self._timer = None
+                self.logger.debug("Data volume reset after inactivity")
 
     def sniff(self) -> None:
         """
         Start sniffing TCP traffic on the specified interface and port.
         Blocks until interrupted (Ctrl-C) or an error occurs.
         """
+        self.logger.info(
+            "Starting sniff on port %d (host=%s, iface=%s)",
+            self._port,
+            self._host or "any",
+            self._iface or "default",
+        )
+
         # Capture packets in both directions with PSH flag set
         bpf_filter = f"tcp port {self._port} and tcp[13] & 0x08 != 0"
         if self._host:
