@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 
 class Loggable:
@@ -38,14 +37,6 @@ class Loggable:
         # inadvertently double‐log if the app configures root handlers.
         if not any(isinstance(h, logging.NullHandler) for h in logger.handlers):
             logger.addHandler(logging.NullHandler())
-
-        # If you really want a standalone stream handler, you can:
-        # handler = logging.StreamHandler()
-        # handler.setFormatter(logging.Formatter(
-        #     "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        # ))
-        # logger.addHandler(handler)
-        # logger.propagate = False
 
         return logger
 
