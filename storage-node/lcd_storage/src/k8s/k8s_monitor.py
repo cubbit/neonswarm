@@ -127,7 +127,9 @@ class K8SDeploymentMonitor(Loggable):
                 body={"spec": {"replicas": replicas}},
             )
             self.logger.info(
-                "Scaled deployment '%s' to %d replicas", self._deployment_name, replicas
+                "Scaled deployment '%s' to %d replicas",
+                self._deployment_name,
+                replicas,
             )
         except Exception as e:
             self.logger.error(
@@ -153,7 +155,9 @@ class K8SDeploymentMonitor(Loggable):
             return deployment.status.replicas or 0
         except Exception as e:
             self.logger.error(
-                "Failed to get replica count for '%s': %s", self._deployment_name, e
+                "Failed to get replica count for '%s': %s",
+                self._deployment_name,
+                e,
             )
             return 0
 
