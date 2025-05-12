@@ -1,268 +1,154 @@
-#!/usr/bin/env python3
-
-"""
-Continuously display disk usage on a 16×2 I2C LCD with optional logging.
-"""
-
-from gpiozero import Device  # noqa: E402
-from gpiozero.pins.lgpio import LGPIOFactory
-
-# tell gpiozero which backend to use, *before* importing Button
-Device.pin_factory = LGPIOFactory()  # noqa: E402
-
 import argparse
 import logging
-import shutil
 import sys
 import time
-import os
-from kubernetes import client, config
+from os import environ
 
-from RPLCD.i2c import CharLCD
+from gpiozero import Device, Button
+from gpiozero.pins.lgpio import LGPIOFactory
+
+from utils.loggable import Loggable
 from utils.parsing import sizeof
-from gpiozero import Button
+from lcd.lcd_controller import LCDController
+from storage_monitor.storage_monitor import StorageMonitor
+from k8s.k8s_monitor import K8SDeploymentMonitor
 
-# Default configuration constants
+# Configure gpiozero to use LGPIO (needed for Raspberry Pi GPIO)
+Device.pin_factory = LGPIOFactory()
+
+# Default CLI values
 DEFAULT_I2C_ADDRESS = 0x27
-DEFAULT_INTERVAL = 10.0
-LCD_COLS = 16
-LCD_ROWS = 2
-DEFAULT_PATH = "/"
+DEFAULT_INTERVAL = 10.0  # seconds
+DEFAULT_BUTTON_PIN = 17  # GPIO pin for on/off button
+DEFAULT_DEPLOYMENT_PREFIX = "agent"
 DEFAULT_NAMESPACE = "neonswarm"
-DEFAULT_BUTTON_PIN = 17  # GPIO pin for the button
-GPIOCHIP = "gpiochip0"  # GPIO interface
-DEFAULT_BUTTON_BOUNCE_TIME = 0.05  # Button debounce in ms
+DEFAULT_PATH = "/"
+DEFAULT_BUTTON_BOUNCE_TIME = 0.05  # seconds
 
 
-class LCDDiskMonitor:
-    """Monitor disk usage and display it on an I2C LCD."""
+class LCDDiskMonitor(Loggable):
+    """
+    Monitor disk usage and display on a 16×2 I2C LCD, with optional K8s scaling.
+
+    Periodically checks the replica count of a Kubernetes Deployment on this node.
+    If replicas == 0, displays "<prefix> is OFF"; otherwise, displays used/total storage.
+    """
 
     def __init__(
         self,
-        path,
-        i2c_addr=DEFAULT_I2C_ADDRESS,
-        interval=DEFAULT_INTERVAL,
-        namespace=DEFAULT_NAMESPACE,
-        button_pin=DEFAULT_BUTTON_PIN,
-    ):
+        path: str,
+        node_name: str,
+        namespace: str,
+        deployment_prefix: str,
+        button_pin: int,
+        i2c_addr: int,
+        interval: float,
+        log_level: int,
+    ) -> None:
+        """
+        Args:
+            path: Filesystem path to monitor.
+            node_name: Kubernetes node name for selecting the Deployment.
+            namespace: Kubernetes namespace containing the Deployment.
+            deployment_prefix: Prefix filter for deployment names.
+            button_pin: GPIO pin number for the on/off button.
+            i2c_addr: I2C address of the LCD device.
+            interval: Polling interval in seconds.
+            log_level: Python logging level.
+        """
+        super().__init__(log_level)
         self._path = path
         self._interval = interval
-        self._namespace = namespace
 
-        logging.debug(
-            "Initializing LCDDiskMonitor: path=%s, address=0x%X, " "interval=%.1fs",
-            path,
-            i2c_addr,
-            interval,
+        # Initialize components
+        self._lcd = LCDController(i2c_addr=i2c_addr, log_level=log_level)
+        self._k8s_monitor = K8SDeploymentMonitor(
+            namespace=namespace,
+            node_name=node_name,
+            deployment_name_prefix=deployment_prefix,
+            log_level=log_level,
         )
-
-        # Kubernetes setup and pick the per-node agent Deployment
-        self._setup_k8s()
-
-        self._lcd = CharLCD(
-            i2c_expander="PCF8574", address=i2c_addr, cols=LCD_COLS, rows=LCD_ROWS
-        )
-
+        self._storage_monitor = StorageMonitor(path=path, log_level=log_level)
         self._button = self._setup_button(button_pin)
 
-    def _setup_button(self, pin):
-        button = Button(
-            pin,
-            pull_up=True,
-            bounce_time=DEFAULT_BUTTON_BOUNCE_TIME,
-        )
-        button.when_pressed = self._on_button_pressed
-        button.when_released = self._on_button_released
+    def _setup_button(self, pin: int) -> Button:
+        """
+        Configure the on/off Button to scale the Deployment up/down.
 
-        return button
+        Returns:
+            Configured gpiozero Button.
+        """
+        btn = Button(pin, pull_up=True, bounce_time=DEFAULT_BUTTON_BOUNCE_TIME)
+        btn.when_pressed = lambda: self._scale(1)
+        btn.when_released = lambda: self._scale(0)
+        return btn
 
-    def _on_button_pressed(self):
-        logging.info(
-            "Button pressed → scaling %s → 1 replica",
-            self._deployment_name,
-        )
+    def _scale(self, replicas: int) -> None:
+        """
+        Scale the monitored Deployment to the specified replica count.
 
-        self._set_deployment_replicas(
-            self._deployment_name,
-            self._namespace,
-            1,
-        )
+        Args:
+            replicas: Desired number of replicas (0 or 1).
+        """
+        name = self._k8s_monitor.deployment_name
+        self.logger.info("Scaling '%s' to %d replicas", name, replicas)
+        self._k8s_monitor.set_replicas(replicas)
 
-        # Monitor immediately to update the LCD accordingly
-        self._monitor()
-
-    def _on_button_released(self):
-        logging.info(
-            "Button released → scaling %s → 0 replica",
-            self._deployment_name,
-        )
-
-        self._set_deployment_replicas(
-            self._deployment_name,
-            self._namespace,
-            0,
-        )
-
-        # Monitor immediately to update the LCD accordingly
-        self._monitor()
-
-    def _set_deployment_replicas(
-        self,
-        deployment,
-        namespace,
-        replicas,
-    ):
-        try:
-            # patch only the replicas field
-            self._k8s.patch_namespaced_deployment(
-                name=deployment,
-                namespace=namespace,
-                body={"spec": {"replicas": replicas}},
-            )
-        except Exception as e:
-            logging.error(
-                "Failed to scale replicas for %s to %d: %s",
-                deployment,
-                replicas,
-                e,
-            )
-
-    def _setup_k8s(self):
-        config.load_incluster_config()
-        logging.debug("Loaded in-cluster K8S config")
-        self._k8s = client.AppsV1Api()
-
-        self._node_name = os.environ.get("NODE_NAME")
-        if not self._node_name:
-            logging.error(
-                "NODE_NAME env variable not set; cannot pick local Deployment. Are you running inside K8S?"
-            )
-            sys.exit(1)
-
-        self._deployment_name = self._pick_local_deployment()
-
-        logging.info("Deployment name: %s", self._deployment_name)
-        if not self._deployment_name:
-            logging.error("No agent Deployment targets node %s", self._node_name)
-            sys.exit(1)
-
-    def _pick_local_deployment(self):
-        deps = self._k8s.list_namespaced_deployment(namespace=self._namespace).items
-        for d in deps:
-            aff = d.spec.template.spec.affinity
-            if not aff or not aff.node_affinity:
-                continue
-
-            req = aff.node_affinity.required_during_scheduling_ignored_during_execution
-            if not req:
-                continue
-
-            for term in req.node_selector_terms:
-                for expr in term.match_expressions or []:
-                    if (
-                        expr.key == "kubernetes.io/hostname"
-                        and self._node_name in expr.values
-                    ):
-                        return d.metadata.name
-        return None
-
-    def _monitor(self):
-        replicas = self._get_agent_replicas()
-
-        logging.info("Agent replicas: %d", replicas)
-
+    def _monitor(self) -> None:
+        """
+        Poll the Deployment replica count and update the LCD accordingly.
+        """
+        replicas = self._k8s_monitor.replicas
         if replicas == 0:
-            # Should stop waiting for an input, displaying that the Agent is OFF
-            self._lcd_write_text("Agent is OFF")
+            # Show OFF message
+            msg = f"{self._k8s_monitor.deployment_name} is OFF"
+            self._lcd.write(msg)
         else:
-            # Should write the Storage
-            used, total = self._get_disk_usage()
-            self._lcd_write_storage(used, total)
+            # Display storage usage
+            used, total = self._storage_monitor.get_disk_usage()
+            line1 = "Storage"
+            line2 = f"{sizeof(used)}/{sizeof(total)}"
+            self._lcd.write([line1, line2])
 
-    def _get_agent_replicas(self):
-        deployment = self._k8s.read_namespaced_deployment(
-            namespace=self._namespace,
-            name=self._deployment_name,
-        )
-        replicas = deployment.spec.replicas or 0
-
-        return replicas
-
-    def _get_disk_usage(self):
-        """Return (used_bytes, total_bytes) for the filesystem path."""
-        try:
-            usage = shutil.disk_usage(self._path)
-        except (FileNotFoundError, PermissionError) as ex:
-            logging.error("Cannot access path %s: %s", self._path, ex)
-            sys.stderr.write(f"Error: {ex}\n")
-            sys.exit(1)
-
-        logging.debug(
-            "Disk usage for %s: total=%d, used=%d, free=%d",
+    def start(self) -> None:
+        """
+        Start the monitoring loop until interrupted by SIGINT.
+        """
+        self.logger.info(
+            "Starting LCDDiskMonitor: path=%s interval=%.1fs",
             self._path,
-            usage.total,
-            usage.used,
-            usage.free,
+            self._interval,
         )
-
-        return usage.used, usage.total
-
-    def _lcd_write_storage(self, used, total):
-        """Write the formatted usage to the LCD."""
-        used_str = sizeof(used)
-        total_str = sizeof(total)
-
-        logging.info("Updating LCD display to '%s/%s'", used_str, total_str)
-
-        time.sleep(0.05)
-
-        self._lcd.clear()
-        self._lcd.write_string("Storage")
-        self._lcd.crlf()
-        self._lcd.write_string(f"{used_str}/{total_str}")
-
-    def _lcd_write_text(self, text):
-        logging.info("Updating LCD display to '%s'", text)
-
-        time.sleep(0.05)
-
-        self._lcd.clear()
-        self._lcd.write_string(text)
-
-    def start(self):
-        """Begin polling and updating the LCD until interrupted."""
-        logging.info(
-            "Starting disk monitor on %s every %.1fs", self._path, self._interval
-        )
-
         try:
             while True:
                 self._monitor()
                 time.sleep(self._interval)
         except KeyboardInterrupt:
-            logging.info("Interrupted; clearing LCD and exiting")
+            self.logger.info("Interrupted; clearing LCD and exiting")
             self._lcd.clear()
             sys.exit(0)
 
 
-def main():
-    """Parse arguments and run the monitor."""
+def main() -> None:
+    """
+    Parse CLI arguments and launch the LCD disk monitor.
+    """
     parser = argparse.ArgumentParser(
-        description=("Display used/total storage on a 16×2 I2C LCD" " with logging.")
+        description="Display disk usage on a 16×2 I2C LCD with optional K8s scaling."
     )
-
     parser.add_argument(
         "-n",
         "--namespace",
         type=str,
-        help="The K8S namespace to scan for agents",
         default=DEFAULT_NAMESPACE,
+        help="Kubernetes namespace containing the Deployment.",
     )
     parser.add_argument(
-        "path",
+        "-p",
+        "--prefix",
         type=str,
-        default=DEFAULT_PATH,
-        help=("Mount point or path to check (e.g. /, /mnt/data, C:\\)."),
+        default=DEFAULT_DEPLOYMENT_PREFIX,
+        help="Prefix filter for Deployment names.",
     )
     parser.add_argument(
         "-a",
@@ -273,10 +159,10 @@ def main():
     )
     parser.add_argument(
         "-b",
-        "--button_pin",
+        "--button-pin",
         type=int,
         default=DEFAULT_BUTTON_PIN,
-        help="On/Off button gpio pin",
+        help="GPIO pin for on/off button (default: 17).",
     )
     parser.add_argument(
         "-i",
@@ -286,27 +172,43 @@ def main():
         help="Seconds between updates (default: 10.0).",
     )
     parser.add_argument(
+        "--path",
+        type=str,
+        default=DEFAULT_PATH,
+        help="Filesystem path to monitor (default: '/').",
+    )
+    parser.add_argument(
+        "--node-name",
+        type=str,
+        default=None,
+        help="Kubernetes node name; defaults to $NODE_NAME env var.",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
-        help="Enable DEBUG-level logging to the console.",
+        help="Enable DEBUG-level logging.",
     )
     args = parser.parse_args()
 
+    # Setup logging
     level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    logging.basicConfig(level=level, format="%(asctime)s [%(levelname)s] %(message)s")
+
+    node_name = args.node_name or environ.get("NODE_NAME")
+    if not node_name:
+        parser.error("NODE_NAME not set and --node-name not provided")
 
     monitor = LCDDiskMonitor(
         path=args.path,
+        node_name=node_name,
+        namespace=args.namespace,
+        deployment_prefix=args.prefix,
+        button_pin=args.button_pin,
         i2c_addr=args.address,
         interval=args.interval,
-        namespace=args.namespace,
+        log_level=level,
     )
-
     monitor.start()
 
 
