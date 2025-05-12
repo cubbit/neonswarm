@@ -9,7 +9,7 @@ from gpiozero.pins.lgpio import LGPIOFactory
 
 from utils.loggable import Loggable
 from utils.parsing import sizeof
-from lcd.lcd_controller import LCDController
+from lcd.lcd import LCDController
 from storage_monitor.storage_monitor import StorageMonitor
 from k8s.k8s_monitor import K8SDeploymentMonitor
 

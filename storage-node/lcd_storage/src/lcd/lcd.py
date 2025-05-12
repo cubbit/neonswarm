@@ -41,7 +41,7 @@ class LCDController(Loggable):
         """
         Clear the LCD display.
         """
-        self.logger.info("Clearing LCD display")
+        self.logger.debug("Clearing LCD display")
         self._lcd.clear()
 
     def write(
