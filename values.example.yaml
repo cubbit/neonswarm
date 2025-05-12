@@ -1,0 +1,102 @@
+global:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - pi-storage1
+                - pi-storage2
+                - pi-storage3
+
+led-sniffer:
+  enabled: true
+
+  image:
+    repository: cubbit/neonswarm-led-sniffer
+    tag: "latest"
+    pullPolicy: Always
+
+  imagePullSecrets:
+    - name: regcred
+
+  # CLI parameters
+  source: ""                  # optional source IP filter
+  port: 32761
+  interface: eth0
+  threshold: 1K
+  delay: 2.0
+  filter_size: 50B             # minimum packet size to consider (bytes)
+
+  # LED / animation parameters
+  led_count: 30
+  led_pin: D18
+  animation_color: "#0065FF"
+  animation_speed: 0.09
+  animation_spacing: 3
+  animation_duration: 2.0
+
+  verbose: false
+
+  privileged: true
+  hostNetwork: true
+
+  devices:
+    - name: gpiomem
+      hostPath: /dev/gpiomem
+    - name: spidev
+      hostPath: /dev/spidev0.0
+
+lcd-storage:
+  image:
+    repository: cubbit/neonswarm-lcd-storage
+    tag: latest
+    pullPolicy: Always
+
+  namespace: neonswarm
+  prefix: agent
+
+  path: /
+  address: 0x27
+  buttonPin: 17
+  interval: 5.0
+  verbose: false
+
+  imagePullSecrets:
+    - name: regcred
+
+  privileged: true
+
+  devices:
+    - name: i2c-bus
+      hostPath: /dev/i2c-1
+      mountPath: /dev/i2c-1
+    - name: gpiochip4
+      hostPath: /dev/gpiochip4
+      mountPath: /dev/gpiochip4
+      type: CharDevice
+
+agent:
+  image:
+    repository: cubbit/agent
+    tag: latest
+    pullPolicy: Always
+
+  port: 4000
+
+  swarm:
+    enabled: true
+    agents:
+      - name: agent1
+        secret: <agent-secret-1>
+        machineId: <agent-machineId-1>
+        nodeName: pi-storage1
+      - name: agent2
+        secret: <agent-secret-2>
+        machineId: <agent-machineId-2>
+        nodeName: pi-storage2
+      - name: agent3
+        secret: <agent-secret-3>
+        machineId: <agent-machineId-3>
+

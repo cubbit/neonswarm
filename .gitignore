@@ -177,3 +177,5 @@ charts/*.tgz
 cert/
 overrides/
 config/
+kubeconfig
+values.yaml

@@ -41,8 +41,14 @@ spec:
             - "{{ .Values.prefix }}"
             - "--address"
             - "{{ .Values.address }}"
+            - "--button-pin"
+            - "{{ .Values.buttonPin }}"
             - "--interval"
             - "{{ .Values.interval }}"
+            {{- if .Values.nodeName }}
+            - "--node-name"
+            - "{{ .Values.nodeName }}"
+            {{- end }}
             {{- if .Values.verbose }}
             - "--verbose"
             {{- end }}
