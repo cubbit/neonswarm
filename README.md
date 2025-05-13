@@ -8,6 +8,7 @@
 | )  \  || (____/\| (___) || )  \  |/\____) || () () || )   ( || ) \ \__| )   ( |
 |/    )_)(_______/(_______)|/    )_)\_______)(_______)|/     \||/   \__/|/     \|                                                                              
 ```
+
 Maker-friendly DIY DS3 Composer Demo Panel powered by Raspberry Pi 5.
 
 <p align="center" width="100%">
@@ -67,14 +68,15 @@ Neonswarm is a compact, PoE-powered Raspberry Pi 5 panel showcasing the Cubbit D
 
 ## PIN Connections
 
-| Signal      | Pi GPIO Pin     | Connector         | Notes                       |
-|-------------|-----------------|-------------------|-----------------------------|
-| 5 V Supply  | Pin 2           | Rocker Switch     | Through switch to HAT VIN   |
-| GND         | Pin 6           | LCD & LED strips  | Common ground               |
-| SDA (I2C)   | Pin 3 (GPIO2)   | LCD SCL/SDA       | I2C data                    |
-| SCL (I2C)   | Pin 5 (GPIO3)   | LCD SCL/SDA       | I2C clock                   |
-| LED DIN     | Pin 12 (GPIO18) | LED strip DIN     | WS2812 data line            |
-| LED GND     | Pin 14 (GND)    | LED strip GND     |                             |
+| Signal           | Pi GPIO Pin       | Physical Pin | Connector         | Notes                                  |
+|------------------|-------------------|--------------|-------------------|----------------------------------------|
+| 5 V Supply       | —                 | 2            | Rocker Switch     | Feeds HAT VIN through power switch     |
+| GND              | —                 | 6            | LCD & LED strips  | Common ground                          |
+| SDA (I2C)        | GPIO 2 (BCM 2)    | 3            | LCD SCL/SDA       | I2C data line                          |
+| SCL (I2C)        | GPIO 3 (BCM 3)    | 5            | LCD SCL/SDA       | I2C clock line                         |
+| LED DIN          | GPIO 18 (BCM 18)  | 12           | LED strip DIN     | WS2812 data in                         |
+| LED GND          | —                 | 14           | LED strip GND     | Strip ground                           |
+| On/Off Button    | GPIO 17 (BCM 17)  | 11           | ButtonPin         | Scales LCD deployment on/off (pull-up) |
 
 ## Raspberry Pi Setup
 
