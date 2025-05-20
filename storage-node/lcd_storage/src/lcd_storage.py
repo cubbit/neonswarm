@@ -9,6 +9,7 @@ from gpiozero.pins.lgpio import LGPIOFactory
 
 from utils.loggable import Loggable
 from utils.parsing import sizeof
+from utils.conversion import convert_to_node_format 
 from lcd.lcd import LCDController
 from storage_monitor.storage_monitor import StorageMonitor
 from k8s.k8s_monitor import K8SDeploymentMonitor
@@ -59,12 +60,14 @@ class LCDDiskMonitor(Loggable):
         super().__init__(log_level)
         self._path = path
         self._interval = interval
+        self._node_name = node_name
+        self._displayed_node_name = convert_to_node_format(node_name)
 
         # Initialize components
         self._lcd = LCDController(i2c_addr=i2c_addr, log_level=log_level)
         self._k8s_monitor = K8SDeploymentMonitor(
             namespace=namespace,
-            node_name=node_name,
+            node_name=self._node_name,
             deployment_name_prefix=deployment_prefix,
             log_level=log_level,
         )
@@ -106,7 +109,7 @@ class LCDDiskMonitor(Loggable):
         else:
             # Display storage usage
             used, total = self._storage_monitor.get_disk_usage()
-            line1 = "Storage"
+            line1 = self._displayed_node_name
             line2 = f"{sizeof(used)}/{sizeof(total)}"
             self._lcd.write([line1, line2])
 

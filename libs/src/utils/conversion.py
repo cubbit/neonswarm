@@ -4,7 +4,7 @@ Utility for converting hex color strings to RGB tuples.
 """
 
 import re
-from typing import Tuple
+from typing import Tuple, Optional, Match
 
 
 class ConversionException(ValueError):
@@ -36,3 +36,36 @@ def hex_to_rgb(hex_string: str) -> Tuple[int, int, int]:
         raise ConversionException(hex_string)
 
     return tuple(int(s[i : i + 2], 16) for i in (0, 2, 4))
+
+def convert_to_node_format(input_string: str) -> str:
+    """
+    Convert a string with a numeric suffix to a 'node-{suffix}' format.
+    
+    This function extracts the numeric suffix from the end of a string and
+    returns a new string in the format 'node-{suffix}'. If no numeric suffix
+    is found, it returns just 'node'.
+    
+    Args:
+        input_string: A string that may contain a numeric suffix (e.g. 'pi-storage3')
+    
+    Returns:
+        A string in the format 'node-{suffix}' where suffix is the numeric part
+        from the end of the input string, or just 'node' if no numeric suffix exists.
+    
+    Examples:
+        >>> convert_to_node_format('pi-storage3')
+        'node-3'
+        >>> convert_to_node_format('server42')
+        'node-42'
+        >>> convert_to_node_format('no-numbers')
+        'node'
+    """
+    # Use regex to find the numeric suffix
+    match: Optional[Match[str]] = re.search(r'(\d+)$', input_string)
+    
+    # If a numeric suffix is found, return "node-{suffix}"
+    if match:
+        return f"node-{match.group(1)}"
+    else:
+        # If no numeric suffix, return just "node"
+        return "node"
