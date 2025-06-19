@@ -49,6 +49,7 @@ led-sniffer:
       hostPath: /dev/spidev0.0
 
 lcd-storage:
+  enabled: true
   image:
     repository: cubbit/neonswarm-lcd-storage
     tag: latest
