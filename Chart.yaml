@@ -12,7 +12,7 @@ dependencies:
   - name: lcd-storage
     version: 1.0.0
     repository: file://charts/lcd-storage
-    condition: lcd_storage.enabled
+    condition: lcd-storage.enabled
   - name: agent
     version: 1.0.0
     repository: file://charts/agent
