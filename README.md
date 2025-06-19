@@ -213,7 +213,7 @@ Read more: [https://docs.cubbit.io/composer/swarms/quickstart](https://docs.cubb
 ## Installing the Swarm
 
 ```bash
-helm upgrade --install neonswarm ./chart \
+helm upgrade --install neonswarm . \
   -n neonswarm --create-namespace \
   -f values.yaml
 ```
