@@ -21,13 +21,20 @@ led-sniffer:
   imagePullSecrets:
     - name: regcred
 
-  # CLI parameters
-  source: ""                  # optional source IP filter
-  port: 32761
-  interface: eth0
-  threshold: 1K
-  delay: 2.0
-  filter_size: 50B             # minimum packet size to consider (bytes)
+  # Capture parameters.
+  #
+  # The sniffer watches the ``cni0`` bridge, which sees raw TCP traffic
+  # entering or leaving pods on this node (before flannel VXLAN
+  # encapsulation). The BPF filter restricts both source and destination
+  # to the flannel pod CIDR, so external NodePort traffic, Netbird and
+  # LAN traffic are structurally excluded.
+  source: ""                   # optional extra BPF 'host <ip>' filter
+  port: ""                     # optional TCP port (empty = any pod-to-pod)
+  interface: cni0              # CNI bridge on K3s/flannel
+  pod_cidr: 10.42.0.0/16       # flannel pod CIDR; matches src AND dst
+  threshold: 30K               # bytes accumulated before animation fires
+  delay: 3.0                   # seconds of inactivity before stopping
+  filter_size: 200B            # min TCP payload to count (drops ACKs, keepalives)
 
   # LED / animation parameters
   led_count: 30
@@ -35,7 +42,6 @@ led-sniffer:
   animation_color: "#0065FF"
   animation_speed: 0.09
   animation_spacing: 3
-  animation_duration: 2.0
 
   verbose: false
 
@@ -43,10 +49,34 @@ led-sniffer:
   hostNetwork: true
 
   devices:
+    # Note: no `type:` here. On Pi 5 these are not character devices by
+    # kubelet's hostPath type check (gpiomem is a mem driver, spidev can
+    # vary by kernel/dtb). Leaving the type unset lets kubelet mount them
+    # as-is.
     - name: gpiomem
       hostPath: /dev/gpiomem
     - name: spidev
       hostPath: /dev/spidev0.0
+
+  resources:
+    requests:
+      cpu: 30m
+      memory: 64Mi
+    limits:
+      cpu: 300m
+      memory: 128Mi
+
+  startupProbe:
+    enabled: true
+    periodSeconds: 10
+    failureThreshold: 30
+    timeoutSeconds: 3
+  livenessProbe:
+    enabled: true
+    periodSeconds: 15
+    failureThreshold: 2
+    timeoutSeconds: 3
+    stalenessSeconds: 30
 
 lcd-storage:
   enabled: true

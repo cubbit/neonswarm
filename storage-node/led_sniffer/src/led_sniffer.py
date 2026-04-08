@@ -1,100 +1,87 @@
 #!/usr/bin/env python3
 """
-TCP packet sniffer with NeoPixel LED notifications.
+LED sniffer — light a NeoPixel strip when real cluster data traffic flows.
 
-Listens for TCP packets on a given port (and optional host/interface),
-accumulates byte counts, and flashes a NeoPixel strip when a byte
-threshold is reached.
+A demo that visualises Cubbit swarm data replication. On each Raspberry Pi
+storage node a DaemonSet pod runs this script, sniffs pod-to-pod TCP
+traffic on the local ``cni0`` bridge, and drives a NeoPixel strip via the
+adafruit-blinka stack.
+
+Design notes
+------------
+* The heavy lifting lives in :class:`ThresholdSniffer` and
+  :class:`ByteAccumulator`. This module only wires CLI args into the
+  sniffer and brokers its callbacks into LED strip calls.
+* A signal handler installs SIGTERM / SIGINT → ``sniffer.request_stop()``
+  so Helm upgrades and Ctrl-C both exit cleanly. The previous design only
+  caught ``KeyboardInterrupt``.
+* The LED strip is turned off on shutdown so the panel does not keep an
+  old animation running after the pod dies.
+* Unlike lcd-storage we deliberately do not show an error frame — this
+  module has no display — but capture errors are still logged and the
+  supervisor loop restarts scapy with exponential backoff.
 """
 
-import os
 import argparse
 import logging
+import os
+import signal
+import sys
+
 import board
-from time import sleep
-from typing import Optional, Tuple
 
 from led.strip import LEDStrip
-from threshold_sniffer.threshold_sniffer import ThresholdSniffer
-from utils.parsing import parse_size
+from threshold_sniffer.threshold_sniffer import ThresholdSniffer, DEFAULT_POD_CIDR, DEFAULT_INTERFACE
+from utils.conversion import ConversionException, hex_to_rgb
 from utils.loggable import Loggable
-from utils.conversion import hex_to_rgb, ConversionException
+from utils.parsing import parse_size
+
+
+# Capture defaults
+DEFAULT_SNIFF_PORT = None                 # None = any TCP port inside the pod CIDR
+DEFAULT_SNIFF_HOST = None
+DEFAULT_SNIFF_INACTIVITY_TIMEOUT_S = 3.0
+DEFAULT_SNIFF_THRESHOLD_BYTES = 30 * 1024           # 30 KB: triggers on real uploads, not health checks
+DEFAULT_SNIFF_SIZE_FILTER_BYTES = 200               # drop ACKs, keepalives, small control segments
+
+# LED defaults
+DEFAULT_LED_COUNT = 30
+DEFAULT_LED_PIN = "D18"
+DEFAULT_ANIMATION_COLOR = "#0065FF"
+DEFAULT_ANIMATION_SPEED = 0.09
+DEFAULT_ANIMATION_SPACING = 3
 
 
 class LedSniffer(Loggable):
     """
-    Combines ThresholdSniffer and LEDStrip to flash LEDs on network activity.
+    Glue between :class:`ThresholdSniffer` and :class:`LEDStrip`.
 
-    Attributes:
-        sniff_port: TCP port to monitor.
-        sniff_threshold: Number of bytes before triggering LEDs.
-        sniff_timeout: Seconds of inactivity before resetting the counter.
-        sniff_host: Optional IP to filter on.
-        sniff_iface: Optional network interface to capture on.
-        led_count: Number of LEDs in the strip.
-        led_pin: GPIO pin driving the strip.
-        animation_color: RGB tuple for the wave effect.
-        animation_speed: Delay between animation steps.
-        animation_spacing: Pixel spacing in the chase effect.
-        animation_duration: Seconds to run the wave after threshold hit.
+    Start / stop animation callbacks are wired into the sniffer at
+    construction time; the main loop runs inside ``sniffer.run_forever``.
     """
-
-    DEFAULT_SNIFF_SOURCE = None
-    DEFAULT_SNIFF_PORT = 4000
-    DEFAULT_SNIFF_IFACE = None
-    DEFAULT_SNIFF_INACTIVITY_TIMEOUT_S = 3.0
-    DEFAULT_SNIFF_THRESHOLD_BYTES = 1024
-    DEFAULT_SNIFF_SIZE_FILTER_BYTES = 50
-
-    DEFAULT_LED_COUNT = 30
-    DEFAULT_LED_PIN = "D18"
-
-    DEFAULT_ANIMATION_COLOR = "#0065FF"
-    DEFAULT_ANIMATION_SPEED = 0.09
-    DEFAULT_ANIMATION_SPACING = 3
-    DEFAULT_ANIMATION_DURATION_S = 2.0
 
     def __init__(
         self,
-        sniff_port: int,
+        sniff_port,
         sniff_threshold: int,
         sniff_timeout: float,
-        sniff_host: Optional[str],
-        sniff_iface: Optional[str],
-        sniff_size_filter_bytes: Optional[int],
+        sniff_host,
+        sniff_iface: str,
+        sniff_size_filter_bytes: int,
+        pod_cidr: str,
         led_count: int,
         led_pin,
-        animation_color: Tuple[int, int, int],
+        animation_color: tuple[int, int, int],
         animation_speed: float,
         animation_spacing: int,
-        animation_duration: float,
         log_level: int,
     ) -> None:
-        """
-        Initialize the LedSniffer.
-
-        :param sniff_port: TCP port to monitor.
-        :param sniff_threshold: Byte threshold to trigger callback.
-        :param sniff_timeout: Inactivity timeout (seconds) to reset counter.
-        :param sniff_host: Optional host IP to filter.
-        :param sniff_iface: Optional interface to capture on.
-        :param sniff_size_filter_bytes: The size of the minimum packet size to consider for the sniff.
-        :param led_count: Number of LEDs in the NeoPixel strip.
-        :param led_pin: GPIO pin for NeoPixel data.
-        :param animation_color: RGB for wave animation.
-        :param animation_speed: Delay per animation frame (s).
-        :param animation_spacing: Spacing between lit pixels.
-        :param animation_duration: Duration to run wave (s) after trigger.
-        :param log_level: Python logging level.
-        """
         super().__init__(log_level)
 
-        self.animation_color = animation_color
-        self.animation_speed = animation_speed
-        self.animation_spacing = animation_spacing
-        self.animation_duration = animation_duration
+        self._animation_color = animation_color
+        self._animation_speed = animation_speed
+        self._animation_spacing = animation_spacing
 
-        # --- set up the network sniffer ---
         self._sniffer = ThresholdSniffer(
             port=sniff_port,
             threshold_bytes=sniff_threshold,
@@ -102,186 +89,132 @@ class LedSniffer(Loggable):
             size_filter_bytes=sniff_size_filter_bytes,
             host=sniff_host,
             iface=sniff_iface,
+            pod_cidr=pod_cidr,
             log_level=log_level,
         )
         self._sniffer.on_start_sniffing = self._start_animation
         self._sniffer.on_stop_sniffing = self._stop_animation
 
-        # --- set up the LED strip ---
-        self.led_strip = LEDStrip(pin=led_pin, led_count=led_count)
-        self.led_strip.off()
+        # Install signal handlers **before** touching hardware. If SIGTERM
+        # arrives during the potentially-slow LEDStrip constructor (SPI /
+        # /dev/gpiomem open) we still want a clean shutdown — the handler
+        # only calls ``_sniffer.request_stop()`` which was initialized
+        # above.
+        signal.signal(signal.SIGTERM, self._handle_signal)
+        signal.signal(signal.SIGINT, self._handle_signal)
 
-    def boot(self) -> None:
-        """
-        Perform any startup routines. Lights the strip briefly
-        in the configured animation_color to show readiness.
-        """
-        self.logger.info("Booting LedSniffer — lighting strip for readiness")
-        self.led_strip.on(self.animation_color)
-        sleep(1.0)
-        self.led_strip.off()
+        self._led_strip = LEDStrip(pin=led_pin, led_count=led_count)
+        self._led_strip.off()
 
     def _start_animation(self) -> None:
-        """
-        Internal callback: run a wave animation when byte threshold is reached.
-        """
-        self.logger.info("Running wave animation")
-        self.led_strip.wave(
-            speed=self.animation_speed,
-            color=self.animation_color,
-            spacing=self.animation_spacing,
+        self.logger.info("starting wave animation")
+        self._led_strip.wave(
+            speed=self._animation_speed,
+            color=self._animation_color,
+            spacing=self._animation_spacing,
             reverse=True,
         )
 
     def _stop_animation(self) -> None:
-        """
-        Internal callback: stop wave animation
-        """
-        self.logger.info("Stopping wave animation")
-        self.led_strip.off()
+        self.logger.info("stopping wave animation")
+        self._led_strip.off()
 
-    def start(self) -> None:
-        """
-        Start the sniffing loop.  Blocks until interrupted.
-        """
-        self._sniffer.sniff()
+    def _handle_signal(self, signum: int, _frame) -> None:
+        self.logger.info("received signal %d, shutting down", signum)
+        self._sniffer.request_stop()
+
+    def run(self) -> None:
+        """Boot the strip, then run the sniffer until stop is requested."""
+        self._sniffer.run_forever()
+        self._led_strip.off()
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """Build the CLI parser. Kept separate from main() to keep wiring tidy."""
+    parser = argparse.ArgumentParser(
+        description="TCP packet sniffer with NeoPixel LED notifications."
+    )
+
+    # Logging
+    parser.add_argument("-v", "--verbose", action="store_true", help="DEBUG logging")
+
+    # Capture
+    env_port = int(os.environ["PORT"]) if os.environ.get("PORT") else DEFAULT_SNIFF_PORT
+    parser.add_argument(
+        "-s", "--source", dest="host", type=str, default=DEFAULT_SNIFF_HOST,
+        help="Optional source host filter (BPF 'host <ip>')",
+    )
+    parser.add_argument(
+        "-p", "--port", dest="port", type=int, default=env_port,
+        help="Optional TCP port restriction (omit for any pod-to-pod TCP)",
+    )
+    parser.add_argument(
+        "-i", "--interface", dest="iface", type=str, default=DEFAULT_INTERFACE,
+        help=f"Interface to sniff (default: {DEFAULT_INTERFACE})",
+    )
+    parser.add_argument(
+        "--pod-cidr", dest="pod_cidr", type=str, default=DEFAULT_POD_CIDR,
+        help=f"Flannel pod CIDR (default: {DEFAULT_POD_CIDR})",
+    )
+    parser.add_argument(
+        "-t", "--threshold", dest="threshold", type=parse_size,
+        default=DEFAULT_SNIFF_THRESHOLD_BYTES,
+        help="Byte threshold before triggering (e.g. 30K, 1M)",
+    )
+    parser.add_argument(
+        "-d", "--delay", dest="timeout", type=float,
+        default=DEFAULT_SNIFF_INACTIVITY_TIMEOUT_S,
+        help="Seconds of inactivity before stopping animation",
+    )
+    parser.add_argument(
+        "-f", "--filter_size", dest="size_filter", type=parse_size,
+        default=DEFAULT_SNIFF_SIZE_FILTER_BYTES,
+        help="Minimum TCP payload size to count (e.g. 200B, 1K)",
+    )
+
+    # LED / animation
+    parser.add_argument("--led-count", type=int, default=DEFAULT_LED_COUNT)
+    parser.add_argument("--led-pin", type=str, default=DEFAULT_LED_PIN)
+    parser.add_argument("--animation-color", type=str, default=DEFAULT_ANIMATION_COLOR)
+    parser.add_argument("--animation-speed", type=float, default=DEFAULT_ANIMATION_SPEED)
+    parser.add_argument("--animation-spacing", type=int, default=DEFAULT_ANIMATION_SPACING)
+
+    return parser
 
 
 def main() -> None:
-    """Parse CLI args and launch the LedSniffer."""
-    parser = argparse.ArgumentParser(
-        description="TCP packet sniffer with NeoPixel LED notification"
-    )
-    # logging args
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Enable DEBUG logging",
-    )
-
-    # network/sniff args…
-    parser.add_argument(
-        "-s",
-        "--source",
-        dest="host",
-        type=str,
-        default=LedSniffer.DEFAULT_SNIFF_SOURCE,
-        help="Source host IP to filter packets",
-    )
-    parser.add_argument(
-        "-p",
-        "--port",
-        dest="port",
-        type=int,
-        default=int(os.environ.get("PORT", LedSniffer.DEFAULT_SNIFF_PORT)),
-        help="TCP port to monitor",
-    )
-    parser.add_argument(
-        "-i",
-        "--interface",
-        dest="iface",
-        type=str,
-        default=LedSniffer.DEFAULT_SNIFF_IFACE,
-        help="Network interface to capture on",
-    )
-    parser.add_argument(
-        "-t",
-        "--threshold",
-        dest="threshold",
-        type=parse_size,
-        default=LedSniffer.DEFAULT_SNIFF_THRESHOLD_BYTES,
-        help="Byte threshold before LED trigger (e.g. 1K, 2M)",
-    )
-    parser.add_argument(
-        "-d",
-        "--delay",
-        dest="timeout",
-        type=float,
-        default=LedSniffer.DEFAULT_SNIFF_INACTIVITY_TIMEOUT_S,
-        help="Seconds of inactivity before resetting counter",
-    )
-    parser.add_argument(
-        "-f",
-        "--filter_size",
-        dest="size_filter",
-        type=parse_size,
-        default=LedSniffer.DEFAULT_SNIFF_SIZE_FILTER_BYTES,
-        help="Minimum size for TCP packet to be considered in the sniffing process (e.g. 1K, 2M)",
-    )
-
-    # LED / animation args
-    parser.add_argument(
-        "--led-count",
-        dest="led_count",
-        type=int,
-        default=LedSniffer.DEFAULT_LED_COUNT,
-        help="Number of LEDs in the strip",
-    )
-    parser.add_argument(
-        "--led-pin",
-        dest="led_pin",
-        type=str,
-        default=LedSniffer.DEFAULT_LED_PIN,
-        help="GPIO pin name for NeoPixel data (e.g. D18)",
-    )
-    parser.add_argument(
-        "--animation-color",
-        dest="animation_color",
-        type=str,
-        default=LedSniffer.DEFAULT_ANIMATION_COLOR,
-        help="Wave color as hex string, e.g. '#FF0000' or '00FF00'",
-    )
-    parser.add_argument(
-        "--animation-speed",
-        dest="animation_speed",
-        type=float,
-        default=LedSniffer.DEFAULT_ANIMATION_SPEED,
-        help="Seconds per frame of the wave animation",
-    )
-    parser.add_argument(
-        "--animation-spacing",
-        dest="animation_spacing",
-        type=int,
-        default=LedSniffer.DEFAULT_ANIMATION_SPACING,
-        help="Pixel spacing for the wave animation",
-    )
-    parser.add_argument(
-        "--animation-duration",
-        dest="animation_duration",
-        type=float,
-        default=LedSniffer.DEFAULT_ANIMATION_DURATION_S,
-        help="Seconds to run the wave after threshold is hit",
-    )
-
+    parser = _build_arg_parser()
     args = parser.parse_args()
 
     log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(level=log_level, format="%(asctime)s %(levelname)s %(message)s")
-
-    rgb_color = None
+    logging.basicConfig(
+        level=log_level, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    )
 
     try:
         rgb_color = hex_to_rgb(args.animation_color)
     except ConversionException:
         parser.error(
-            "`--animation-color` must be a 6-digit hex color, e.g. '#FF0000' or '00FF00'"
+            "--animation-color must be a 6-digit hex color, e.g. '#FF0000' or '00FF00'"
         )
 
-    # Resolve the board pin from its name
     try:
         pin = getattr(board, args.led_pin)
     except AttributeError:
-        parser.error(f"Unknown board pin `{args.led_pin}`; use e.g. 'D18', 'D17', etc.")
+        parser.error(f"unknown board pin {args.led_pin!r}; use e.g. 'D18', 'D17'")
 
-        # Log runtime configuration
     logging.debug(
-        f"Starting with configuration: host={args.host or 'any'}, port={args.port}, "
-        f"iface={args.iface or 'default'}, threshold={args.threshold} bytes, "
-        f"timeout={args.timeout} s, filter_size={args.size_filter} bytes, "
-        f"led_count={args.led_count}, led_pin={args.led_pin}, "
-        f"animation_color={args.animation_color}, animation_speed={args.animation_speed}, "
-        f"animation_spacing={args.animation_spacing}, animation_duration={args.animation_duration}"
+        "config: host=%s port=%s iface=%s pod_cidr=%s threshold=%d timeout=%.1fs size_filter=%d led_count=%d led_pin=%s color=%s",
+        args.host or "any",
+        args.port if args.port is not None else "any",
+        args.iface,
+        args.pod_cidr,
+        args.threshold,
+        args.timeout,
+        args.size_filter,
+        args.led_count,
+        args.led_pin,
+        args.animation_color,
     )
 
     sniffer = LedSniffer(
@@ -291,16 +224,16 @@ def main() -> None:
         sniff_host=args.host,
         sniff_iface=args.iface,
         sniff_size_filter_bytes=args.size_filter,
+        pod_cidr=args.pod_cidr,
         led_count=args.led_count,
         led_pin=pin,
         animation_color=rgb_color,
         animation_speed=args.animation_speed,
         animation_spacing=args.animation_spacing,
-        animation_duration=args.animation_duration,
         log_level=log_level,
     )
-    sniffer.boot()
-    sniffer.start()
+    sniffer.run()
+    sys.exit(0)
 
 
 if __name__ == "__main__":

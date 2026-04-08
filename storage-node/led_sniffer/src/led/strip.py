@@ -1,6 +1,5 @@
-import time
 import threading
-from typing import Tuple
+import time
 
 import adafruit_pixelbuf
 from adafruit_raspberry_pi5_neopixel_write import neopixel_write
@@ -47,21 +46,38 @@ class LEDStrip:
         """
         self._strip = Pi5Pixelbuf(pin, led_count, auto_write=True, byteorder="RGB")
         self._running = threading.Event()
+        self._animation_lock = threading.Lock()
         self._thread = threading.Thread(target=self._run, daemon=True)
-        self._animation = None  # type: ReverseChase | None
+        self._animation: ReverseChase | None = None
         self._status = "off"
 
     def _run(self) -> None:
-        """Background thread that steps the current animation."""
+        """
+        Background thread that steps the current animation while running.
+
+        Parks on ``_running.wait()`` when idle so the thread never consumes
+        CPU when the strip is off. While running, reads ``_animation`` under
+        a lock so a concurrent ``wave()``/``off()`` can never observe or
+        mutate a half-constructed animation object. A short yield after
+        each ``animate()`` call prevents a 100%-CPU spin in the case where
+        the adafruit animation library returns early because the next
+        frame is not yet due.
+        """
         while True:
-            if self._running.is_set() and self._animation:
-                self._animation.animate()
-            else:
-                time.sleep(0.02)
+            self._running.wait()
+            with self._animation_lock:
+                animation = self._animation
+            if animation is None:
+                # wave() cleared it between wait() and here; loop back.
+                continue
+            animation.animate()
+            # Yield to give the OS a chance to schedule other threads and
+            # to avoid a busy loop if animate() is rate-limiting itself.
+            time.sleep(0.005)
 
     def on(
         self,
-        color: Tuple[int, int, int] = (255, 255, 255),
+        color: tuple[int, int, int] = (255, 255, 255),
     ) -> None:
         """
         Light the entire strip in a solid color.
@@ -78,8 +94,10 @@ class LEDStrip:
         self._status = "on"
 
     def off(self) -> None:
-        """Turn off all LEDs immediately."""
+        """Turn off all LEDs immediately and clear any current animation."""
         self._running.clear()
+        with self._animation_lock:
+            self._animation = None
         self._strip.fill((0, 0, 0))
         self._strip.show()
         self._status = "off"
@@ -87,7 +105,7 @@ class LEDStrip:
     def wave(
         self,
         speed: float = 0.09,
-        color: Tuple[int, int, int] = (0, 101, 255),
+        color: tuple[int, int, int] = (0, 101, 255),
         spacing: int = 3,
         reverse: bool = True,
     ) -> None:
@@ -102,14 +120,15 @@ class LEDStrip:
         if not self._thread.is_alive():
             self._thread.start()
 
-        # Configure and start animation
-        self._animation = ReverseChase(
+        animation = ReverseChase(
             self._strip,
             speed=speed,
             color=color,
             spacing=spacing,
             reverse=reverse,
         )
+        with self._animation_lock:
+            self._animation = animation
         self._running.set()
         self._status = "wave"
 

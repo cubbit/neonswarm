@@ -15,10 +15,10 @@ spec:
     spec:
       affinity:
         nodeAffinity:
-{{ toYaml .Values.global.nodeAffinity | indent 10 }}
-      {{- if .Values.imagePullSecrets }}
+          {{- toYaml .Values.global.nodeAffinity | nindent 10 }}
+      {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
-      {{ toYaml .Values.imagePullSecrets | indent 8 }}
+        {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- if .Values.hostNetwork }}
       hostNetwork: true
@@ -35,18 +35,24 @@ spec:
             - "--verbose"
             {{- end }}
             {{- if .Values.source }}
-            - "--source" 
+            - "--source"
             - "{{ .Values.source }}"
             {{- end }}
-            - "--port" 
+            {{- if .Values.port }}
+            - "--port"
             - "{{ .Values.port }}"
+            {{- end }}
             {{- if .Values.interface }}
-            - "--interface" 
+            - "--interface"
             - "{{ .Values.interface }}"
             {{- end }}
-            - "--threshold" 
+            {{- if .Values.pod_cidr }}
+            - "--pod-cidr"
+            - "{{ .Values.pod_cidr }}"
+            {{- end }}
+            - "--threshold"
             - "{{ .Values.threshold }}"
-            - "--delay" 
+            - "--delay"
             - "{{ .Values.delay }}"
             - "--filter_size"
             - "{{ .Values.filter_size }}"
@@ -60,8 +66,32 @@ spec:
             - "{{ .Values.animation_speed }}"
             - "--animation-spacing"
             - "{{ .Values.animation_spacing }}"
-            - "--animation-duration"
-            - "{{ .Values.animation_duration }}"
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if and .Values.startupProbe .Values.startupProbe.enabled }}
+          # Gates the liveness probe until the first health file touch.
+          startupProbe:
+            exec:
+              command: ["test", "-f", "/tmp/healthy"]
+            periodSeconds: {{ .Values.startupProbe.periodSeconds | default 10 }}
+            failureThreshold: {{ .Values.startupProbe.failureThreshold | default 30 }}
+            timeoutSeconds: {{ .Values.startupProbe.timeoutSeconds | default 3 }}
+          {{- end }}
+          {{- if and .Values.livenessProbe .Values.livenessProbe.enabled }}
+          # Touched every supervisor iteration (success or capture error).
+          # A stale marker means the loop itself is hung.
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - 'test -f /tmp/healthy && test $(( $(date +%s) - $(stat -c %Y /tmp/healthy) )) -lt {{ .Values.livenessProbe.stalenessSeconds | default 30 }}'
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds | default 15 }}
+            failureThreshold: {{ .Values.livenessProbe.failureThreshold | default 2 }}
+            timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds | default 3 }}
+          {{- end }}
           volumeMounts:
             {{- range .Values.devices }}
             - name: {{ .name }}
@@ -74,6 +104,5 @@ spec:
             path: {{ .hostPath }}
             {{- if .type }}
             type: {{ .type }}
-            {{- end}}
+            {{- end }}
         {{- end }}
-      restartPolicy: Always

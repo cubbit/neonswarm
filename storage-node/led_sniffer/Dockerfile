@@ -1,12 +1,13 @@
 FROM python:3.11-slim
 
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       build-essential \
       libpcap-dev \
-      i2c-tools \
-      libgpiod2 \
-      python3-smbus \
+      libgpiod3 \
       python3-rpi.gpio \
  && pip install --upgrade pip setuptools wheel \
  && rm -rf /var/lib/apt/lists/*
