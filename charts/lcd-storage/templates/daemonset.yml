@@ -52,6 +52,22 @@ spec:
             {{- if .Values.verbose }}
             - "--verbose"
             {{- end }}
+          {{- with .Values.resources }}
+          resources:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          {{- if and .Values.livenessProbe .Values.livenessProbe.enabled }}
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - 'test -f /tmp/healthy && test $(( $(date +%s) - $(stat -c %Y /tmp/healthy) )) -lt {{ .Values.livenessProbe.stalenessSeconds | default 30 }}'
+            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds | default 30 }}
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds | default 15 }}
+            failureThreshold: {{ .Values.livenessProbe.failureThreshold | default 2 }}
+            timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds | default 3 }}
+          {{- end }}
           {{- if .Values.devices }}
           volumeMounts:
 {{- range .Values.devices }}

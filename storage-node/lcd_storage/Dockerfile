@@ -1,11 +1,14 @@
 FROM python:3.11-slim
 
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       build-essential \
       libpcap-dev \
       i2c-tools \
-      libgpiod2 \
+      libgpiod3 \
       python3-libgpiod \
       python3-smbus \
       python3-smbus2 \

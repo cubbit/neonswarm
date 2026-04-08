@@ -1,15 +1,27 @@
 import logging
+
 from kubernetes import client, config
+from kubernetes.client.exceptions import ApiException
+
 from utils.loggable import Loggable
+
+
+class DeploymentNotFoundError(RuntimeError):
+    """Raised when no deployment matches the prefix/node filter."""
 
 
 class K8SDeploymentMonitor(Loggable):
     """
     Monitor a Kubernetes Deployment running locally on this node and manage its replicas.
 
-    This class loads the in-cluster Kubernetes configuration, filters deployments by the
-    provided prefix, selects the deployment whose pods target the specified node, and
-    provides methods to scale and query the deployment's replica count.
+    Loads in-cluster config, filters deployments by the provided prefix, selects the one
+    whose node affinity targets this node, and provides methods to read and scale the
+    deployment. Self-heals if the deployment is renamed or recreated by re-running the
+    discovery on NotFound errors.
+
+    Unlike the previous implementation, this class **propagates exceptions** to the
+    caller instead of swallowing them and returning sentinel values — the supervisor
+    loop in ``lcd_storage.py`` is responsible for handling transient failures.
     """
 
     def __init__(
@@ -29,7 +41,8 @@ class K8SDeploymentMonitor(Loggable):
             log_level: Logging level for monitor output.
 
         Raises:
-            RuntimeError: If no matching deployment is found or configuration fails.
+            RuntimeError: If in-cluster config cannot be loaded.
+            DeploymentNotFoundError: If no matching deployment exists.
         """
         super().__init__(log_level)
 
@@ -38,16 +51,6 @@ class K8SDeploymentMonitor(Loggable):
         self._deployment_name_prefix = deployment_name_prefix
         self._deployment_name = ""
 
-        self._setup_k8s()
-
-    def _setup_k8s(self) -> None:
-        """
-        Configure the Kubernetes client and select the matching deployment.
-
-        Raises:
-            RuntimeError: If configuration fails or no deployment matches.
-        """
-        # Load in-cluster configuration
         try:
             config.load_incluster_config()
             self.logger.debug("Loaded in-cluster Kubernetes configuration")
@@ -55,10 +58,8 @@ class K8SDeploymentMonitor(Loggable):
             self.logger.error("Failed to load in-cluster config: %s", e)
             raise RuntimeError("Cannot load in-cluster Kubernetes configuration") from e
 
-        # Initialize the AppsV1 API client
         self._k8s = client.AppsV1Api()
 
-        # Select the deployment targeting this node
         self._deployment_name = self._pick_local_deployment()
         if not self._deployment_name:
             message = (
@@ -66,26 +67,21 @@ class K8SDeploymentMonitor(Loggable):
                 f"found targeting node '{self._node_name}'"
             )
             self.logger.error(message)
-            raise RuntimeError(message)
+            raise DeploymentNotFoundError(message)
 
         self.logger.info("Selected deployment: %s", self._deployment_name)
 
     def _pick_local_deployment(self) -> str:
         """
-        Find the Deployment whose pods are scheduled on the specified node.
+        Find the Deployment whose node affinity targets this node.
 
         Returns:
             The name of the matching deployment, or an empty string if none found.
+
+        Raises:
+            ApiException: If the list call fails (caller handles).
         """
-        try:
-            deps = self._k8s.list_namespaced_deployment(self._namespace).items
-        except Exception as e:
-            self.logger.error(
-                "Failed to list deployments in namespace '%s': %s",
-                self._namespace,
-                e,
-            )
-            return ""
+        deps = self._k8s.list_namespaced_deployment(self._namespace).items
 
         for dep in deps:
             name = dep.metadata.name
@@ -108,65 +104,100 @@ class K8SDeploymentMonitor(Loggable):
                 for expr in term.match_expressions or []:
                     if (
                         expr.key == "kubernetes.io/hostname"
-                        and self._node_name in expr.values
+                        and self._node_name in (expr.values or [])
                     ):
                         return name
         return ""
+
+    def _rediscover(self) -> None:
+        """
+        Re-run discovery after a deployment vanishes. Updates ``_deployment_name``.
+
+        Raises:
+            DeploymentNotFoundError: If no matching deployment exists.
+        """
+        self.logger.warning(
+            "Rediscovering deployment for prefix '%s' on node '%s'",
+            self._deployment_name_prefix,
+            self._node_name,
+        )
+        new_name = self._pick_local_deployment()
+        if not new_name:
+            raise DeploymentNotFoundError(
+                f"No deployment with prefix '{self._deployment_name_prefix}' "
+                f"found targeting node '{self._node_name}'"
+            )
+        if new_name != self._deployment_name:
+            self.logger.info(
+                "Deployment changed: '%s' -> '%s'", self._deployment_name, new_name
+            )
+        self._deployment_name = new_name
 
     def set_replicas(self, replicas: int) -> None:
         """
         Scale the monitored deployment to the specified number of replicas.
 
+        On NotFound, re-runs discovery once and retries.
+
         Args:
             replicas: Desired number of replicas.
+
+        Raises:
+            ApiException: For any K8s error other than handled NotFound.
+            DeploymentNotFoundError: If rediscovery fails.
         """
+        body = {"spec": {"replicas": replicas}}
         try:
             self._k8s.patch_namespaced_deployment(
                 name=self._deployment_name,
                 namespace=self._namespace,
-                body={"spec": {"replicas": replicas}},
+                body=body,
             )
-            self.logger.info(
-                "Scaled deployment '%s' to %d replicas",
-                self._deployment_name,
-                replicas,
+        except ApiException as e:
+            if e.status != 404:
+                raise
+            self._rediscover()
+            self._k8s.patch_namespaced_deployment(
+                name=self._deployment_name,
+                namespace=self._namespace,
+                body=body,
             )
-        except Exception as e:
-            self.logger.error(
-                "Failed to scale deployment '%s' to %d replicas: %s",
-                self._deployment_name,
-                replicas,
-                e,
-            )
+
+        self.logger.info(
+            "Scaled deployment '%s' to %d replicas", self._deployment_name, replicas
+        )
 
     @property
     def replicas(self) -> int:
         """
-        Get the current number of replicas for the monitored deployment.
+        Get the **desired** replica count from the Deployment spec.
+
+        Using ``spec.replicas`` (not ``status.replicas``) means the UI reflects
+        intent immediately after a scale operation instead of lagging behind
+        until the pods are actually running.
 
         Returns:
-            The current replica count.
+            The current desired replica count. Zero means scaled down.
+
+        Raises:
+            ApiException: For any K8s error other than handled NotFound.
+            DeploymentNotFoundError: If rediscovery fails.
         """
         try:
             deployment = self._k8s.read_namespaced_deployment(
                 name=self._deployment_name, namespace=self._namespace
             )
-            # Use status.replicas for actual current replicas
-            return deployment.status.replicas or 0
-        except Exception as e:
-            self.logger.error(
-                "Failed to get replica count for '%s': %s",
-                self._deployment_name,
-                e,
+        except ApiException as e:
+            if e.status != 404:
+                raise
+            self._rediscover()
+            deployment = self._k8s.read_namespaced_deployment(
+                name=self._deployment_name, namespace=self._namespace
             )
-            return 0
+
+        return deployment.spec.replicas or 0
 
     @property
     def deployment_name(self) -> str:
-        """
-        Return the name of the monitored deployment.
-
-        Returns:
-            Deployment name.
-        """
+        """Return the name of the monitored deployment."""
         return self._deployment_name

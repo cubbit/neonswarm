@@ -8,5 +8,5 @@ dependencies:
 - name: agent
   repository: file://charts/agent
   version: 1.0.0
-digest: sha256:7c6dc13969313efac05909f20a88fc09ebec6783e907a6f63c6e8e0c3039755c
-generated: "2025-04-25T16:42:45.893742+02:00"
+digest: sha256:32ccabd899c0089873615c483f32c6ca57601e37db5d75bc1bac5a1f73e5278a
+generated: "2026-04-08T17:50:02.705451+02:00"

@@ -6,10 +6,8 @@ metadata:
 rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
-    verbs: 
+    verbs:
       - get
       - list
-      - watch
       - patch
-      - update
 
