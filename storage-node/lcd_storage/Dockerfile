@@ -6,7 +6,6 @@ ENV PYTHONUNBUFFERED=1 \
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       build-essential \
-      libpcap-dev \
       i2c-tools \
       libgpiod3 \
       python3-libgpiod \

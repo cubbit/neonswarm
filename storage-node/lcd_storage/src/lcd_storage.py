@@ -36,6 +36,7 @@ from typing import Callable, List, Optional, TypeVar
 
 from gpiozero import Device, Button
 from gpiozero.pins.lgpio import LGPIOFactory
+from kubernetes.client.exceptions import ApiException
 
 from utils.loggable import Loggable
 from utils.conversion import convert_to_node_format
@@ -141,8 +142,6 @@ class LCDDiskMonitor(Loggable):
         self._stop_event = threading.Event()
         self._wake_event = threading.Event()
 
-        # Last known desired replicas as reported by the Deployment spec.
-        self._last_known_replicas: Optional[int] = None
         # Error counters
         self._consec_errors: int = 0
         self._consec_lcd_errors: int = 0
@@ -177,8 +176,8 @@ class LCDDiskMonitor(Loggable):
     def _setup_button(self, pin: int) -> Button:
         """Wire up the rocker switch. Callbacks stay non-blocking."""
         btn = Button(pin, pull_up=True, bounce_time=DEFAULT_BUTTON_BOUNCE_TIME)
-        btn.when_pressed = self._on_pressed
-        btn.when_released = self._on_released
+        btn.when_pressed = self._on_rocker_change
+        btn.when_released = self._on_rocker_change
         return btn
 
     def _install_signal_handlers(self) -> None:
@@ -198,12 +197,8 @@ class LCDDiskMonitor(Loggable):
     # position on every iteration, so no button event can ever be "lost" due
     # to a failed K8s call — the next successful tick will re-apply it.
 
-    def _on_pressed(self) -> None:
-        """Rocker switched to 'I' — wake the loop to reconcile."""
-        self._wake_event.set()
-
-    def _on_released(self) -> None:
-        """Rocker switched to 'O' — wake the loop to reconcile."""
+    def _on_rocker_change(self) -> None:
+        """Rocker toggled — wake the loop to reconcile against its new position."""
         self._wake_event.set()
 
     # ---- tick implementation (main thread) ------------------------------
@@ -235,9 +230,7 @@ class LCDDiskMonitor(Loggable):
             self._k8s_monitor.set_replicas(desired_replicas)
             current_replicas = desired_replicas
 
-        self._last_known_replicas = current_replicas
-
-        # 3. Read disk usage only when we intend to display it
+        # 4. Read disk usage only when we intend to display it.
         disk_used: Optional[int] = None
         disk_total: Optional[int] = None
         if current_replicas:
@@ -246,7 +239,7 @@ class LCDDiskMonitor(Loggable):
             except (FileNotFoundError, PermissionError, OSError) as e:
                 self.logger.warning("disk read failed, continuing: %s", e)
 
-        # 4. Render and write the frame
+        # 5. Render and write the frame.
         frame = render_frame(
             node_label=self._displayed_node_name,
             spec_replicas=current_replicas,
@@ -292,16 +285,20 @@ class LCDDiskMonitor(Loggable):
             "Starting LCDDiskMonitor: path=%s interval=%.1fs", self._path, self._interval
         )
 
-        # Clear any boot frame and let the first tick paint fresh state.
+        # Prime the health file before the first tick so the liveness probe
+        # sees a fresh marker even if the first tick is slow.
         self._touch_health()
 
         while not self._stop_event.is_set():
-            tick_start = time.monotonic()
-            tick_deadline = tick_start + self._interval
+            tick_deadline = time.monotonic() + self._interval
 
             try:
                 self._tick()
                 self._consec_errors = 0
+            except (KeyboardInterrupt, SystemExit):
+                self.logger.info("shutdown requested from tick")
+                self._stop_event.set()
+                break
             except Exception as exc:
                 self._consec_errors += 1
                 self.logger.exception(
@@ -341,12 +338,11 @@ class LCDDiskMonitor(Loggable):
         """Return (short_label, detail) for an error frame."""
         if isinstance(exc, DeploymentNotFoundError):
             return ("NO AGENT", "")
-        name = type(exc).__name__
-        if name == "ApiException":
+        if isinstance(exc, ApiException):
             return ("K8S ERROR", "")
         if isinstance(exc, (FileNotFoundError, PermissionError, OSError)):
             return ("DISK ERROR", "")
-        return ("ERROR", name[:16])
+        return ("ERROR", type(exc).__name__[:16])
 
     def _touch_health(self) -> None:
         """Update the liveness probe marker."""

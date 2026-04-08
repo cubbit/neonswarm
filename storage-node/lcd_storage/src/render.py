@@ -33,15 +33,12 @@ def render_frame(
         A list of exactly two strings, each at most COLS characters.
     """
     if not spec_replicas:
-        off_msg = f"{deployment_name} is OFF"
-        return [_trim(off_msg), ""]
+        return [_trim(f"{deployment_name} is OFF"), ""]
 
     if disk_used is None or disk_total is None:
         return [_trim(node_label), "disk: n/a"]
 
-    line1 = _trim(node_label)
-    line2 = _trim(f"{sizeof(disk_used)}/{sizeof(disk_total)}")
-    return [line1, line2]
+    return [_trim(node_label), _trim(f"{sizeof(disk_used)}/{sizeof(disk_total)}")]
 
 
 def render_error(short_label: str, detail: str = "") -> List[str]:
@@ -60,6 +57,4 @@ def render_error(short_label: str, detail: str = "") -> List[str]:
 
 def _trim(text: str) -> str:
     """Trim a string to fit on one LCD row."""
-    if len(text) <= COLS:
-        return text
     return text[:COLS]

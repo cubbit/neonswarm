@@ -1,9 +1,24 @@
 import logging
+from typing import Callable, TypeVar
 
 from kubernetes import client, config
 from kubernetes.client.exceptions import ApiException
 
 from utils.loggable import Loggable
+
+T = TypeVar("T")
+
+# HTTP status codes on which we rediscover the target deployment. 404 means
+# the named deployment no longer exists; 410 Gone means the apiserver's cache
+# has expired the reference (can happen after etcd compaction or a
+# deleted-and-recreated resource).
+_REDISCOVER_STATUSES = {404, 410}
+
+# Per-request timeout for Kubernetes API calls. Without this, the
+# kubernetes-python client has no default read timeout — a hung apiserver
+# would block the supervisor loop's main thread indefinitely and defeat both
+# clean shutdown and the liveness probe.
+_REQUEST_TIMEOUT_SECONDS = 10.0
 
 
 class DeploymentNotFoundError(RuntimeError):
@@ -49,7 +64,6 @@ class K8SDeploymentMonitor(Loggable):
         self._namespace = namespace
         self._node_name = node_name
         self._deployment_name_prefix = deployment_name_prefix
-        self._deployment_name = ""
 
         try:
             config.load_incluster_config()
@@ -62,10 +76,7 @@ class K8SDeploymentMonitor(Loggable):
 
         self._deployment_name = self._pick_local_deployment()
         if not self._deployment_name:
-            message = (
-                f"No deployment with prefix '{self._deployment_name_prefix}' "
-                f"found targeting node '{self._node_name}'"
-            )
+            message = self._not_found_message()
             self.logger.error(message)
             raise DeploymentNotFoundError(message)
 
@@ -81,7 +92,9 @@ class K8SDeploymentMonitor(Loggable):
         Raises:
             ApiException: If the list call fails (caller handles).
         """
-        deps = self._k8s.list_namespaced_deployment(self._namespace).items
+        deps = self._k8s.list_namespaced_deployment(
+            self._namespace, _request_timeout=_REQUEST_TIMEOUT_SECONDS
+        ).items
 
         for dep in deps:
             name = dep.metadata.name
@@ -109,6 +122,12 @@ class K8SDeploymentMonitor(Loggable):
                         return name
         return ""
 
+    def _not_found_message(self) -> str:
+        return (
+            f"No deployment with prefix '{self._deployment_name_prefix}' "
+            f"found targeting node '{self._node_name}'"
+        )
+
     def _rediscover(self) -> None:
         """
         Re-run discovery after a deployment vanishes. Updates ``_deployment_name``.
@@ -123,15 +142,29 @@ class K8SDeploymentMonitor(Loggable):
         )
         new_name = self._pick_local_deployment()
         if not new_name:
-            raise DeploymentNotFoundError(
-                f"No deployment with prefix '{self._deployment_name_prefix}' "
-                f"found targeting node '{self._node_name}'"
-            )
+            raise DeploymentNotFoundError(self._not_found_message())
         if new_name != self._deployment_name:
             self.logger.info(
                 "Deployment changed: '%s' -> '%s'", self._deployment_name, new_name
             )
         self._deployment_name = new_name
+
+    def _call_with_rediscover(self, op: Callable[[], T]) -> T:
+        """
+        Run ``op`` against the current deployment; on 404/410, rediscover
+        once and retry.
+
+        Any other ApiException status (e.g. 503 Service Unavailable during an
+        apiserver restart) is propagated unchanged for the supervisor loop
+        to classify and display.
+        """
+        try:
+            return op()
+        except ApiException as e:
+            if e.status not in _REDISCOVER_STATUSES:
+                raise
+            self._rediscover()
+            return op()
 
     def set_replicas(self, replicas: int) -> None:
         """
@@ -147,22 +180,14 @@ class K8SDeploymentMonitor(Loggable):
             DeploymentNotFoundError: If rediscovery fails.
         """
         body = {"spec": {"replicas": replicas}}
-        try:
-            self._k8s.patch_namespaced_deployment(
+        self._call_with_rediscover(
+            lambda: self._k8s.patch_namespaced_deployment(
                 name=self._deployment_name,
                 namespace=self._namespace,
                 body=body,
+                _request_timeout=_REQUEST_TIMEOUT_SECONDS,
             )
-        except ApiException as e:
-            if e.status != 404:
-                raise
-            self._rediscover()
-            self._k8s.patch_namespaced_deployment(
-                name=self._deployment_name,
-                namespace=self._namespace,
-                body=body,
-            )
-
+        )
         self.logger.info(
             "Scaled deployment '%s' to %d replicas", self._deployment_name, replicas
         )
@@ -183,18 +208,13 @@ class K8SDeploymentMonitor(Loggable):
             ApiException: For any K8s error other than handled NotFound.
             DeploymentNotFoundError: If rediscovery fails.
         """
-        try:
-            deployment = self._k8s.read_namespaced_deployment(
-                name=self._deployment_name, namespace=self._namespace
+        deployment = self._call_with_rediscover(
+            lambda: self._k8s.read_namespaced_deployment(
+                name=self._deployment_name,
+                namespace=self._namespace,
+                _request_timeout=_REQUEST_TIMEOUT_SECONDS,
             )
-        except ApiException as e:
-            if e.status != 404:
-                raise
-            self._rediscover()
-            deployment = self._k8s.read_namespaced_deployment(
-                name=self._deployment_name, namespace=self._namespace
-            )
-
+        )
         return deployment.spec.replicas or 0
 
     @property

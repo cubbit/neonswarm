@@ -77,12 +77,19 @@ lcd-storage:
       cpu: 200m
       memory: 128Mi
 
+  # Startup probe gates the liveness probe until the supervisor loop has
+  # touched /tmp/healthy at least once. Worst-case init retry window is
+  # ~3 min, so 30 × 10s = 5 min budget before kubelet gives up.
+  startupProbe:
+    enabled: true
+    periodSeconds: 10
+    failureThreshold: 30
+    timeoutSeconds: 3
   # Liveness probe checks that /tmp/healthy was touched recently.
-  # The supervisor loop touches this file on every iteration (success or error),
-  # so a stale marker indicates the loop itself is hung.
+  # The supervisor loop touches this file on every iteration (success or
+  # error), so a stale marker indicates the loop itself is hung.
   livenessProbe:
     enabled: true
-    initialDelaySeconds: 30
     periodSeconds: 15
     failureThreshold: 2
     timeoutSeconds: 3
@@ -92,6 +99,7 @@ lcd-storage:
     - name: i2c-bus
       hostPath: /dev/i2c-1
       mountPath: /dev/i2c-1
+      type: CharDevice
     - name: gpiochip4
       hostPath: /dev/gpiochip4
       mountPath: /dev/gpiochip4

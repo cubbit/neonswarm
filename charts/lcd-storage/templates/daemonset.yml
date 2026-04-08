@@ -15,10 +15,10 @@ spec:
     spec:
       affinity:
         nodeAffinity:
-{{ toYaml .Values.global.nodeAffinity | indent 10 }}
-      {{- if .Values.imagePullSecrets }}
+          {{- toYaml .Values.global.nodeAffinity | nindent 10 }}
+      {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
-{{ toYaml .Values.imagePullSecrets | indent 8 }}
+        {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
         - name: lcd-storage
@@ -54,7 +54,17 @@ spec:
             {{- end }}
           {{- with .Values.resources }}
           resources:
-{{ toYaml . | indent 12 }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if and .Values.startupProbe .Values.startupProbe.enabled }}
+          # Gates the liveness probe until the first health file touch.
+          # Tolerates the worst-case init retry window (~3 min).
+          startupProbe:
+            exec:
+              command: ["test", "-f", "/tmp/healthy"]
+            periodSeconds: {{ .Values.startupProbe.periodSeconds | default 10 }}
+            failureThreshold: {{ .Values.startupProbe.failureThreshold | default 30 }}
+            timeoutSeconds: {{ .Values.startupProbe.timeoutSeconds | default 3 }}
           {{- end }}
           {{- if and .Values.livenessProbe .Values.livenessProbe.enabled }}
           livenessProbe:
@@ -63,7 +73,6 @@ spec:
                 - sh
                 - -c
                 - 'test -f /tmp/healthy && test $(( $(date +%s) - $(stat -c %Y /tmp/healthy) )) -lt {{ .Values.livenessProbe.stalenessSeconds | default 30 }}'
-            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds | default 30 }}
             periodSeconds: {{ .Values.livenessProbe.periodSeconds | default 15 }}
             failureThreshold: {{ .Values.livenessProbe.failureThreshold | default 2 }}
             timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds | default 3 }}
@@ -90,4 +99,3 @@ spec:
 {{- end }}
       {{- end }}
       serviceAccountName: lcd-storage-sa
-      restartPolicy: Always
