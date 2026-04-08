@@ -48,15 +48,11 @@ led-sniffer:
   privileged: true
   hostNetwork: true
 
-  devices:
-    # Note: no `type:` here. On Pi 5 these are not character devices by
-    # kubelet's hostPath type check (gpiomem is a mem driver, spidev can
-    # vary by kernel/dtb). Leaving the type unset lets kubelet mount them
-    # as-is.
-    - name: gpiomem
-      hostPath: /dev/gpiomem
-    - name: spidev
-      hostPath: /dev/spidev0.0
+  # No device hostPath mounts needed. With privileged: true the container
+  # already has access to the host's /dev, which is how the NeoPixel
+  # driver reaches /dev/mem. Adding /dev/gpiomem or /dev/spidev0.0 here
+  # would shadow the real paths with empty directories.
+  devices: []
 
   resources:
     requests:

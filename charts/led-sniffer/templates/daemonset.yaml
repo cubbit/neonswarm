@@ -92,13 +92,16 @@ spec:
             failureThreshold: {{ .Values.livenessProbe.failureThreshold | default 2 }}
             timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds | default 3 }}
           {{- end }}
+          {{- with .Values.devices }}
           volumeMounts:
-            {{- range .Values.devices }}
+            {{- range . }}
             - name: {{ .name }}
               mountPath: {{ .hostPath }}
             {{- end }}
+          {{- end }}
+      {{- with .Values.devices }}
       volumes:
-        {{- range .Values.devices }}
+        {{- range . }}
         - name: {{ .name }}
           hostPath:
             path: {{ .hostPath }}
@@ -106,3 +109,4 @@ spec:
             type: {{ .type }}
             {{- end }}
         {{- end }}
+      {{- end }}
