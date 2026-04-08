@@ -1,8 +1,10 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: lcd-storage-reader
+  name: {{ include "lcd-storage.fullname" . }}-reader
   namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lcd-storage.labels" . | nindent 4 }}
 rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]

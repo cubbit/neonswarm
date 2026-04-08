@@ -1,19 +1,38 @@
+{{/*
+Per-agent PersistentVolume + PersistentVolumeClaim.
+
+Each agent gets a local PV pinned to its assigned node via
+``nodeAffinity``, backed by a **per-agent** host path
+``/data/agent/<name>``. The previous design shared ``/data/agent``
+across all agents, which was only safe because each PV pinned to a
+different node — changing the affinity would have silently caused two
+agents to share the same directory and corrupt each other's data.
+
+Uses a dedicated ``storageClassName: neonswarm-agent-local`` instead of
+``local-path`` so K3s's built-in local-path provisioner does not race
+with our manual PV/PVC binding. No StorageClass resource is created —
+the class name is just a label matching the PV to the PVC by
+``volumeName``.
+*/}}
 {{- range .Values.swarm.agents }}
+{{- $ctx := dict "root" $ "agent" . }}
 ---
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: "{{ .name }}-data"
+  name: {{ include "agent.fullname" $ctx }}-data
+  labels:
+    {{- include "agent.labels" $ctx | nindent 4 }}
 spec:
   capacity:
-    storage: 100G
+    storage: {{ $.Values.persistence.size | default "100G" }}
   volumeMode: Filesystem
   accessModes:
     - ReadWriteOnce
-  persistentVolumeReclaimPolicy: Retain
-  storageClassName: local-path
+  persistentVolumeReclaimPolicy: {{ $.Values.persistence.reclaimPolicy | default "Retain" }}
+  storageClassName: {{ $.Values.persistence.storageClassName | default "neonswarm-agent-local" }}
   local:
-    path: /data/agent
+    path: {{ printf "%s/%s" ($.Values.persistence.hostPathRoot | default "/data/agent") .name }}
   nodeAffinity:
     required:
       nodeSelectorTerms:
@@ -23,16 +42,18 @@ spec:
               values:
                 - {{ .nodeName }}
 ---
-kind: PersistentVolumeClaim
 apiVersion: v1
+kind: PersistentVolumeClaim
 metadata:
-  name: "{{ .name }}-data-volume"
+  name: {{ include "agent.fullname" $ctx }}-data-volume
+  labels:
+    {{- include "agent.labels" $ctx | nindent 4 }}
 spec:
-  storageClassName: local-path
+  storageClassName: {{ $.Values.persistence.storageClassName | default "neonswarm-agent-local" }}
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 100G
-  volumeName: "{{ .name }}-data"
+      storage: {{ $.Values.persistence.size | default "100G" }}
+  volumeName: {{ include "agent.fullname" $ctx }}-data
 {{- end }}

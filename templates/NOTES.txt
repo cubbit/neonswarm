@@ -1,0 +1,64 @@
+
+  _        _______  _______  _        _______           _______  _______  _______
+ ( (    /|(  ____ \(  ___  )( (    /|(  ____ \|\     /|(  ___  )(  ____ )(       )
+ |  \  ( || (    \/| (   ) ||  \  ( || (    \/| )   ( || (   ) || (    )|| () () |
+ |   \ | || (__    | |   | ||   \ | || (_____ | | _ | || (___) || (____)|| || || |
+ | (\ \) ||  __)   | |   | || (\ \) |(_____  )| |( )| ||  ___  ||     __)| |(_)| |
+ | | \   || (      | |   | || | \   |      ) || || || || (   ) || (\ (   | |   | |
+ | )  \  || (____/\| (___) || )  \  |/\____) || () () || )   ( || ) \ \__| )   ( |
+ |/    )_)(_______/(_______)|/    )_)\_______)(_______)|/     \||/   \__/|/     \|
+
+Release {{ .Release.Name | quote }} deployed to namespace {{ .Release.Namespace | quote }}.
+Chart {{ .Chart.Name }}-{{ .Chart.Version }} (appVersion {{ .Chart.AppVersion }}).
+
+----------------------------------------------------------------------------------------
+Quick status
+----------------------------------------------------------------------------------------
+
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+  kubectl -n {{ .Release.Namespace }} get deploy,ds,pvc,secret -l app.kubernetes.io/instance={{ .Release.Name }}
+  helm -n {{ .Release.Namespace }} status {{ .Release.Name }}
+
+----------------------------------------------------------------------------------------
+Live logs
+----------------------------------------------------------------------------------------
+
+  # LCD daemonset (one pod per storage node):
+  kubectl -n {{ .Release.Namespace }} logs -f -l app.kubernetes.io/component=storage-monitor --prefix
+
+  # LED sniffer daemonset (one pod per storage node):
+  kubectl -n {{ .Release.Namespace }} logs -f -l app.kubernetes.io/component=packet-sniffer --prefix
+
+  # Cubbit agents (one deployment per swarm member):
+  kubectl -n {{ .Release.Namespace }} logs -f -l app.kubernetes.io/component=swarm-agent --prefix
+
+----------------------------------------------------------------------------------------
+Physical demo
+----------------------------------------------------------------------------------------
+
+  1. Flip a rocker switch on any storage pi.
+     Within ~1s the LCD on that node should show "<agent> is OFF" and the
+     corresponding agent{N} deployment should scale to 0 replicas.
+
+  2. Flip the rocker back.
+     The LCD should show the node label + disk usage within ~1s, and the
+     agent deployment should come back to 1 replica.
+
+  3. Upload a photo to the offloader NodePort service.
+     The LED strip on each node receiving a replica shard should light up
+     (wave animation) while the bytes are flowing, and return to off after
+     the configured inactivity window ({{ index .Values "led-sniffer" "delay" | default 3 }}s).
+
+----------------------------------------------------------------------------------------
+Troubleshooting
+----------------------------------------------------------------------------------------
+
+  # Describe a crash-looping pod:
+  kubectl -n {{ .Release.Namespace }} describe pod <pod-name>
+
+  # Verify RBAC lets lcd-storage scale the agent deployment:
+  kubectl -n {{ .Release.Namespace }} auth can-i patch deployments \
+      --as=system:serviceaccount:{{ .Release.Namespace }}:{{ .Release.Name }}-lcd-storage-sa
+
+  # Roll DaemonSet after an image push (pullPolicy: Always picks up the new digest):
+  kubectl -n {{ .Release.Namespace }} rollout restart ds/{{ .Release.Name }}-lcd-storage ds/{{ .Release.Name }}-led-sniffer

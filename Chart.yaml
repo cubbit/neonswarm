@@ -1,19 +1,32 @@
 apiVersion: v2
 name: neonswarm
-description: Umbrella chart for all neonswarm micro-apps
+description: Umbrella chart for the Neonswarm Raspberry Pi DS3 demo panel
 type: application
-version: 1.0.0
-kubeVersion: ">=1.20.0-0"
+version: 1.1.0
+appVersion: "1.1.0"
+kubeVersion: ">=1.24.0-0"
+home: https://github.com/cubbit/neonswarm
+sources:
+  - https://github.com/cubbit/neonswarm
+maintainers:
+  - name: Marco Moschettini
+    email: hello@cubbit.io
+keywords:
+  - cubbit
+  - ds3
+  - raspberrypi
+  - k3s
+  - demo
 dependencies:
   - name: led-sniffer
-    version: 1.0.0
-    repository: "file://charts/led-sniffer"
+    version: 1.1.0
+    repository: file://charts/led-sniffer
     condition: led-sniffer.enabled
   - name: lcd-storage
-    version: 1.0.0
+    version: 1.1.0
     repository: file://charts/lcd-storage
     condition: lcd-storage.enabled
   - name: agent
-    version: 1.0.0
+    version: 1.1.0
     repository: file://charts/agent
-    condition: swarm.enabled
+    condition: agent.swarm.enabled

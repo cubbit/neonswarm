@@ -48,6 +48,22 @@ led-sniffer:
   privileged: true
   hostNetwork: true
 
+  # Rolling update knobs (applied to the DaemonSet's updateStrategy block).
+  updateStrategy:
+    maxUnavailable: 1
+  minReadySeconds: 10
+  terminationGracePeriodSeconds: 30
+
+  # Tolerate node taints if the cluster adds any. Empty by default.
+  tolerations: []
+
+  # Extra CLI flags appended to the base args. Useful for debugging without
+  # editing the chart template.
+  extraArgs: []
+  # extraArgs:
+  #   - "--animation-duration"
+  #   - "5.0"
+
   # No device hostPath mounts needed. With privileged: true the container
   # already has access to the host's /dev, which is how the NeoPixel
   # driver reaches /dev/mem. Adding /dev/gpiomem or /dev/spidev0.0 here
@@ -95,6 +111,23 @@ lcd-storage:
 
   privileged: true
 
+  # Rolling update knobs.
+  updateStrategy:
+    maxUnavailable: 1
+  minReadySeconds: 10
+  terminationGracePeriodSeconds: 30
+
+  tolerations: []
+
+  # Extra CLI flags appended to the base args.
+  extraArgs: []
+
+  # ServiceAccount + RBAC:
+  serviceAccount:
+    create: true
+    name: ""       # default: "<release>-lcd-storage-sa"
+    annotations: {}
+
   resources:
     requests:
       cpu: 20m
@@ -137,20 +170,65 @@ agent:
     tag: latest
     pullPolicy: Always
 
+  imagePullSecrets:
+    - name: regcred
+
+  # Agent TCP port. Used for the liveness probe's tcpSocket check and as
+  # the containerPort in the Deployment.
   port: 4000
+
+  replicas: 1
+  strategy: Recreate        # local PV is ReadWriteOnce, so Recreate avoids pod overlap
+
+  terminationGracePeriodSeconds: 60
+
+  tolerations: []
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # Persistent storage. Each agent gets its own PV pinned to its node via
+  # local.path + nodeAffinity, under the per-agent subdirectory
+  # ``<hostPathRoot>/<agent-name>``.
+  persistence:
+    size: 100G
+    reclaimPolicy: Retain
+    storageClassName: neonswarm-agent-local
+    hostPathRoot: /data/agent
 
   swarm:
     enabled: true
     agents:
+      # Replace the placeholders with real values from the Cubbit Composer
+      # dashboard. ``secret`` is the --secret argument from the suggested
+      # docker run command; ``machineId`` is the --machineId UUID.
       - name: agent1
-        secret: <agent-secret-1>
-        machineId: <agent-machineId-1>
+        secret: "PASTE_AGENT_1_SECRET_HERE"
+        machineId: "00000000-0000-0000-0000-000000000001"
         nodeName: pi-storage1
       - name: agent2
-        secret: <agent-secret-2>
-        machineId: <agent-machineId-2>
+        secret: "PASTE_AGENT_2_SECRET_HERE"
+        machineId: "00000000-0000-0000-0000-000000000002"
         nodeName: pi-storage2
       - name: agent3
-        secret: <agent-secret-3>
-        machineId: <agent-machineId-3>
-
+        secret: "PASTE_AGENT_3_SECRET_HERE"
+        machineId: "00000000-0000-0000-0000-000000000003"
+        nodeName: pi-storage3

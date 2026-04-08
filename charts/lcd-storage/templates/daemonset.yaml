@@ -3,28 +3,41 @@ kind: DaemonSet
 metadata:
   name: {{ include "lcd-storage.fullname" . }}
   labels:
-    app: {{ include "lcd-storage.fullname" . }}
+    {{- include "lcd-storage.labels" . | nindent 4 }}
 spec:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ .Values.updateStrategy.maxUnavailable | default 1 }}
+  minReadySeconds: {{ .Values.minReadySeconds | default 10 }}
   selector:
     matchLabels:
-      app: {{ include "lcd-storage.fullname" . }}
+      {{- include "lcd-storage.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        app: {{ include "lcd-storage.fullname" . }}
+        {{- include "lcd-storage.labels" . | nindent 8 }}
     spec:
       affinity:
         nodeAffinity:
           {{- toYaml .Values.global.nodeAffinity | nindent 10 }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      serviceAccountName: {{ include "lcd-storage.serviceAccountName" . }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds | default 30 }}
       containers:
         - name: lcd-storage
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
           securityContext:
+            # I2C + GPIO access via /dev/i2c-1 + gpiochip4 requires CAP_SYS_RAWIO
+            # and access to /dev, which privileged: true provides in full.
             privileged: {{ .Values.privileged }}
           command: ["lcd-storage"]
           env:
@@ -52,6 +65,9 @@ spec:
             {{- if .Values.verbose }}
             - "--verbose"
             {{- end }}
+            {{- with .Values.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- with .Values.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -77,25 +93,24 @@ spec:
             failureThreshold: {{ .Values.livenessProbe.failureThreshold | default 2 }}
             timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds | default 3 }}
           {{- end }}
-          {{- if .Values.devices }}
+          {{- with .Values.devices }}
           volumeMounts:
-{{- range .Values.devices }}
+            {{- range . }}
             - name: {{ .name }}
               mountPath: {{ .mountPath }}
               {{- if .readOnly }}
               readOnly: {{ .readOnly }}
               {{- end }}
-{{- end }}
+            {{- end }}
           {{- end }}
-      {{- if .Values.devices }}
+      {{- with .Values.devices }}
       volumes:
-{{- range .Values.devices }}
+        {{- range . }}
         - name: {{ .name }}
           hostPath:
             path: {{ .hostPath }}
             {{- if .type }}
             type: {{ .type }}
             {{- end }}
-{{- end }}
+        {{- end }}
       {{- end }}
-      serviceAccountName: lcd-storage-sa

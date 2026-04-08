@@ -1,14 +1,16 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: lcd-storage-reader-binding
+  name: {{ include "lcd-storage.fullname" . }}-reader-binding
   namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lcd-storage.labels" . | nindent 4 }}
 subjects:
   - kind: ServiceAccount
-    name: lcd-storage-sa
+    name: {{ include "lcd-storage.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
 roleRef:
   kind: Role
-  name: lcd-storage-reader
+  name: {{ include "lcd-storage.fullname" . }}-reader
   apiGroup: rbac.authorization.k8s.io
 

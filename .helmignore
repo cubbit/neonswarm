@@ -1,4 +1,40 @@
+# Python bytecode and caches
 *.pyc
+*.pyo
 __pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Git
 .git/
+.gitignore
+.gitattributes
+
+# Media / large binary assets
 assets/
+
+# Python source + tests (not packaged in the chart)
+storage-node/
+libs/
+
+# Docs + dev tooling
+*.md
+.planning/
+.github/
+.claude/
+
+# Local dev
+deploy.sh
+Makefile
+values.yaml
+values.yaml.backup*
+secrets.yaml.pre-*
+
+# macOS cruft
+.DS_Store
+
+# Editor swap files
+*.swp
+*.swo
+*~

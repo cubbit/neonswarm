@@ -3,32 +3,48 @@ kind: DaemonSet
 metadata:
   name: {{ include "led-sniffer.fullname" . }}
   labels:
-    app: {{ include "led-sniffer.fullname" . }}
+    {{- include "led-sniffer.labels" . | nindent 4 }}
 spec:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ .Values.updateStrategy.maxUnavailable | default 1 }}
+  minReadySeconds: {{ .Values.minReadySeconds | default 10 }}
   selector:
     matchLabels:
-      app: {{ include "led-sniffer.fullname" . }}
+      {{- include "led-sniffer.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        app: {{ include "led-sniffer.fullname" . }}
+        {{- include "led-sniffer.labels" . | nindent 8 }}
     spec:
       affinity:
         nodeAffinity:
           {{- toYaml .Values.global.nodeAffinity | nindent 10 }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- if .Values.hostNetwork }}
+      # hostNetwork is required so scapy can sniff the cni0 bridge in the
+      # host network namespace (flannel's pod bridge). Without it, the pod
+      # only sees its own veth side and misses pod-to-pod traffic.
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds | default 30 }}
       containers:
         - name: led-sniffer
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
           securityContext:
+            # CAP_NET_RAW is required for scapy's pcap-based capture, and
+            # the NeoPixel driver pokes /dev/mem directly — both require
+            # full privileged mode.
             privileged: {{ .Values.privileged }}
           args:
             {{- if .Values.verbose }}
@@ -66,6 +82,9 @@ spec:
             - "{{ .Values.animation_speed }}"
             - "--animation-spacing"
             - "{{ .Values.animation_spacing }}"
+            {{- with .Values.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- with .Values.resources }}
           resources:
             {{- toYaml . | nindent 12 }}

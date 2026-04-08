@@ -1,12 +1,12 @@
 dependencies:
 - name: led-sniffer
   repository: file://charts/led-sniffer
-  version: 1.0.0
+  version: 1.1.0
 - name: lcd-storage
   repository: file://charts/lcd-storage
-  version: 1.0.0
+  version: 1.1.0
 - name: agent
   repository: file://charts/agent
-  version: 1.0.0
-digest: sha256:32ccabd899c0089873615c483f32c6ca57601e37db5d75bc1bac5a1f73e5278a
-generated: "2026-04-08T17:50:02.705451+02:00"
+  version: 1.1.0
+digest: sha256:5ae50f9e91c55093268ab0432ed639bab94d02bfd539bdc5f2f7db38e3313ac6
+generated: "2026-04-08T19:53:24.349263+02:00"

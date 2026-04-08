@@ -1,50 +1,91 @@
 {{- range .Values.swarm.agents }}
+{{- $ctx := dict "root" $ "agent" . }}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .name }}
+  name: {{ include "agent.fullname" $ctx }}
+  labels:
+    {{- include "agent.labels" $ctx | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ $.Values.replicas | default 1 }}
+  strategy:
+    type: {{ $.Values.strategy | default "Recreate" }}
   selector:
     matchLabels:
-      app: {{ .name }}
+      {{- include "agent.selectorLabels" $ctx | nindent 6 }}
   template:
     metadata:
       labels:
-        app: {{ .name }}
+        {{- include "agent.labels" $ctx | nindent 8 }}
     spec:
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
-                - key: kubernetes.io/hostname
-                  operator: In
-                  values:
-                  - {{ .nodeName }} 
-      imagePullSecrets: 
-        - name: regcred
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - {{ .nodeName }}
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ $.Values.terminationGracePeriodSeconds | default 60 }}
+      securityContext:
+        {{- toYaml ($.Values.podSecurityContext | default dict) | nindent 8 }}
       containers:
-      - name: agent
-        image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"
-        imagePullPolicy: {{ $.Values.image.pullPolicy }} 
-        ports:
-        - containerPort: {{ $.Values.port }}
-        env:
-          - name: AGENT_SECRET
-            value: {{ .secret }}
-          - name: MACHINE_ID
-            value: {{ .machineId }}
-        volumeMounts:
-          - mountPath: /media/shard
-            name: {{ .name }}
-            subPath: data
-          - mountPath: /data/cubbit
-            name: {{ .name }}
-            subPath: config
+        - name: agent
+          image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy | default "IfNotPresent" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: false
+          ports:
+            - name: agent
+              containerPort: {{ $.Values.port }}
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: {{ include "agent.fullname" $ctx }}-credentials
+          {{- with $.Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if and $.Values.livenessProbe $.Values.livenessProbe.enabled }}
+          livenessProbe:
+            tcpSocket:
+              port: agent
+            initialDelaySeconds: {{ $.Values.livenessProbe.initialDelaySeconds | default 30 }}
+            periodSeconds: {{ $.Values.livenessProbe.periodSeconds | default 30 }}
+            timeoutSeconds: {{ $.Values.livenessProbe.timeoutSeconds | default 5 }}
+            failureThreshold: {{ $.Values.livenessProbe.failureThreshold | default 3 }}
+          {{- end }}
+          {{- if and $.Values.readinessProbe $.Values.readinessProbe.enabled }}
+          readinessProbe:
+            tcpSocket:
+              port: agent
+            initialDelaySeconds: {{ $.Values.readinessProbe.initialDelaySeconds | default 5 }}
+            periodSeconds: {{ $.Values.readinessProbe.periodSeconds | default 10 }}
+            timeoutSeconds: {{ $.Values.readinessProbe.timeoutSeconds | default 3 }}
+            failureThreshold: {{ $.Values.readinessProbe.failureThreshold | default 3 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /media/shard
+              subPath: data
+            - name: data
+              mountPath: /data/cubbit
+              subPath: config
       volumes:
-        - name: {{ .name }}
+        - name: data
           persistentVolumeClaim:
-            claimName: "{{ .name }}-data-volume"
-{{- end }} 
+            claimName: {{ include "agent.fullname" $ctx }}-data-volume
+{{- end }}
