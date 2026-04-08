@@ -173,9 +173,10 @@ agent:
   imagePullSecrets:
     - name: regcred
 
-  # Agent TCP port. Used for the liveness probe's tcpSocket check and as
-  # the containerPort in the Deployment.
-  port: 4000
+  # Agent TCP port. Used for the liveness/readiness probe's tcpSocket
+  # check and as the containerPort in the Deployment. The Cubbit agent
+  # binary exposes its admin HTTP endpoint on port 80 internally.
+  port: 80
 
   replicas: 1
   strategy: Recreate        # local PV is ReadWriteOnce, so Recreate avoids pod overlap
